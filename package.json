@@ -1,7 +1,15 @@
 {
   "name": "dsh-mapper",
-  "version": "0.0.7",
+  "version": "0.1.0",
   "description": "A visual conversation map plugin for DeepSeek Harness: sessions, follow-ups and forks as one navigable canvas.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "conversation-map",
+    "session-visualisation"
+  ],
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
@@ -15,7 +23,10 @@
     "lib/client.js",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "docs/contract-notes.md"
   ],
   "scripts": {
     "build": "node scripts/build.mjs && tsc --noEmit",

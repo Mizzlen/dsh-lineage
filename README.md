@@ -6,7 +6,7 @@ A visual conversation map plugin for DeepSeek Harness: sessions, follow-ups and 
 
 **DSH session logs remain the only source of truth.** The plugin reads them on demand through `ctx.sessionQuery` and persists nothing but view metadata (lane drag offsets). It never touches prompts, tool schemas, provider routing, or KV-cache prefixes.
 
-## Features (v0.0.7)
+## Features (v0.1.0)
 
 - **Lineage map (default)**: a tree rooted at a root session is ONE map — opening it from any member shows the WHOLE tree from the root: the ancestor chain, ancestors' other branches, and all descendants. Lineage follows `parentSessionId` with **no workspace separation inside the tree** (a fork child stuck in a cwd bucket is still the same tree); a branch added on any lane appears in the same map immediately, and any ancestor ↔ any descendant pair is one click apart.
 - **Workspace view (drill-up)**: one click expands to the flat session slice of a workspace bucket — the tier that mirrors how DSH itself lists sessions.
@@ -48,9 +48,13 @@ Open any session → the 「会话地图」 header button → the map overlay. H
 
 ## Known limits
 
-- Jump relies on sidebar-row title matching and the chat DOM anchor prefix (`data-chat-anchor-key`) — a version-sensitive bridge, centralized in `src/client/glue.ts` with explicit degradation.
-- Follow-up requires the session to be materialized in the client (an existing binding); otherwise the map asks you to open it once natively.
+- Jump relies on the native sidebar's DOM structure (the row's title leaf, the chat anchor prefix `data-chat-anchor-key`) — a version-sensitive bridge, centralized in `src/client/glue.ts`. Matching runs in three passes (title-leaf exact → safe composed-strip → aggressive strip) and on failure dumps full evidence to the console as `__dshmJumpDebug` before degrading explicitly.
+- Branching from a turn that is still running has no `turn/end` yet: the cut falls back to the turn's opening question (the unfinished answer is not inherited).
 - Not implemented: minimap, synapse data import, settings card (configuration stays in the patch file).
+
+## Release status
+
+Prepared per the [dsh.pub plugin development and catalog-admission guide](https://dsh.pub/develop-plugin.md): the repository root is an independently installable package with committed runtime artifacts, a declared safe `dsh.bundle.patch`, and CI covering build, tests, artifact-contract checks and a web-profile activation smoke. dsh.pub listing happens through its automated gates and a submission Pull Request — **it implies no human review, security audit, compatibility certification, or official DeepSeek endorsement**.
 
 ## License
 
