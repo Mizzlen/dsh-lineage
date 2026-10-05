@@ -103,3 +103,11 @@ window.__ModuleLoader__.load({
 5. **追问后的卡片回流**：`prompt` 接受（`{accepted:true}`）≠ 已完成；地图侧需要两条刷新路径——`useSessions` 的 running 翻转（true→false）触发该会话 turns 重拉 + 发送成功后定时（4s/12s）回拉。只失效缓存不触发拉取是无效的（M2 实测踩坑）。
 6. **画布布局必须两遍实测**：卡片自然高度（~150px）远大于估算（114px），估算法在 fork 树上必然重叠；渲染后 `useLayoutEffect` 量 `offsetHeight` 回灌重排一遍即收敛。视口剔除与测量互相饿死（未渲染的泳道永远量不到），当前语料规模下全量渲染 + 实测是正确取舍。
 7. **`shell.overlay` 的 hooks 通道不可用而普通 callback 成员可用**（M1 已记）——稳定自定义 hook（useState+subscribe）作为 inject 成员传入，React 视角是普通 hook，实测可靠。
+
+## Desktop（Electron）安装实测（2026-10-04）
+
+- Desktop = `/Applications/DeepSeek Harness.app`，与 CLI **共用 `~/.dsh`**（同一 sessions/storages），启动 `~/.dsh/profiles/desktop`（bundle 栈 = `dsh-base` + `dsh-web-app`），内嵌同一套 web 栈并监听 `127.0.0.1:19387`（带与 web 相同的 token 鉴权 fence）。
+- `dsh plugin --profile desktop …` 被拒：`profile "desktop" is managed exclusively by the Electron application`。
+- **手工安装（改 package.json bundles/deps + node_modules 软链）会让 desktop host 启动挂起**：只要 profile 目录里存在 `node_modules`（完整 pnpm install 或裸 symlink 均复现），host 进程起得来但永不监听端口；移除 node_modules 后立即恢复。仅改 manifest（无 node_modules）能正常启动但行无法解析、被静默忽略（路由 404）。
+- 结论：Desktop 的受支持安装路径是**应用内**的 Plugins 页（或 creator 模式 agent 的 `plugin_manager` 工具），由应用自己的 reconciler 处理依赖。dsh-mapper 尚未装入 desktop；待用户走应用内流程。
+- 注意：Desktop renderer 若经 `dsh-app://` scheme 发起 fetch，Host 头可能不是 localhost——届时把实际 host 加进 cordis.patch.yml 的 `trustedHosts` 即可（配置已预留）。
