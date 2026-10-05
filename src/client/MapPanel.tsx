@@ -3,7 +3,7 @@
 // Content is fetched on demand from the Host routes; nothing is cached to
 // disk and no polling runs while the map is closed (D6/D8). Lane drag
 // offsets persist per workspace through the Host layout routes.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { GraphDTO, LayoutDocDTO, NodeDTO, TurnListDTO } from '../shared/protocol'
 
 const CARD_W = 300
@@ -13,7 +13,6 @@ const LANE_MIN_H = 150
 const GAP_X = 90
 const GAP_Y = 46
 const GROUP_GAP = 110
-const CULL_MARGIN = 800
 
 interface TurnCacheEntry {
   promise: Promise<TurnListDTO>
@@ -33,8 +32,13 @@ export function invalidateTurns(sessionIds: Iterable<string>): void {
   for (const id of sessionIds) turnCache.delete(id)
 }
 
+function refetchTurnInto(sessionId: string, apply: (list: TurnListDTO) => void): void {
+  turnCache.delete(sessionId)
+  void fetchTurns(sessionId).then(apply).catch(() => {})
+}
+
 export interface MapActions {
-  jump(sessionId: string, seq: number, displayTitle: string): Promise<'ok' | 'session-not-in-sidebar' | 'turn-not-found' | 'no-dom'>
+  jump(sessionId: string, messageId: string | null, displayTitle: string): Promise<'ok' | 'session-switched' | 'session-not-in-sidebar' | 'turn-not-found' | 'no-dom'>
   followUp(sessionId: string, text: string): Promise<void>
   forkAt(sessionId: string, atSeq?: number): Promise<string>
 }
@@ -95,19 +99,25 @@ export function layoutGraph(
       seen.add(node.sessionId)
       const x = depth * (CARD_W + GAP_X)
       maxX = Math.max(maxX, x + CARD_W)
+      const ownHeight = laneHeight(node.sessionId)
       const children = (childrenOf.get(node.sessionId) ?? []).filter(c => byId.has(c.sessionId) && !seen.has(c.sessionId))
       let y: number
       if (children.length === 0) {
         y = leafY
-        leafY += laneHeight(node.sessionId) + GAP_Y
+        leafY = y + ownHeight + GAP_Y
       } else {
+        // Children reserve vertical space first; the parent aligns to its
+        // first child but its own card stack must not overlap rows below —
+        // the subtree reserves max(child span, own height).
         let firstChildY = Number.POSITIVE_INFINITY
         for (const child of children) {
           firstChildY = Math.min(firstChildY, visit(child, depth + 1))
         }
         y = firstChildY
+        leafY = Math.max(leafY, y + ownHeight + GAP_Y)
       }
-      positions.set(node.sessionId, { x, y, laneHeight: laneHeight(node.sessionId) })
+      maxY = Math.max(maxY, y + ownHeight)
+      positions.set(node.sessionId, { x, y, laneHeight: ownHeight })
       return y
     }
 
@@ -163,6 +173,7 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
   const [viewSize, setViewSize] = useState({ w: 1280, h: 720 })
   const [drag, setDrag] = useState<{ sessionId: string; workspaceId: string; baseX: number; baseY: number; dx: number; dy: number } | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
+  const layerRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ startX: number; startY: number; camX: number; camY: number } | null>(null)
   const toastTimer = useRef(0)
 
@@ -256,15 +267,53 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // Real lane heights: cards render at natural size (multi-line text, chips,
+  // action rows), so estimates only seed pass one — a layout effect measures
+  // actual offsetHeights and feeds them back until stable.
+  const [measured, setMeasured] = useState<Record<string, number>>({})
+
+  // A session's running flip true→false means its latest turn changed:
+  // refresh that lane's cards right away.
+  const panelRunningRef = useRef<Record<string, boolean>>({})
+  useEffect(() => {
+    const stopped = Object.entries(panelRunningRef.current)
+      .filter(([id, wasRunning]) => wasRunning && runningById[id] !== true)
+      .map(([id]) => id)
+    panelRunningRef.current = runningById
+    if (stopped.length === 0) return
+    for (const id of stopped) {
+      refetchTurnInto(id, list => setTurns(current => new Map(current).set(id, list)))
+    }
+  }, [runningById])
+
   const laneHeights = useMemo(() => {
     const heights = new Map<string, number>()
     for (const node of graph?.nodes ?? []) {
       const list = turns.get(node.sessionId)
       const count = list === undefined ? 1 : Math.max(1, list.turns.length)
-      heights.set(node.sessionId, LANE_HEADER_H + count * (TURN_H + 18))
+      heights.set(node.sessionId, measured[node.sessionId] ?? LANE_HEADER_H + count * (TURN_H + 18))
     }
     return heights
-  }, [graph, turns])
+  }, [graph, turns, measured])
+
+  // Pass two of the layout: after every commit, measure the real lane heights
+  // (cards render at natural size) and feed them back. Positions never affect
+  // heights, so this converges in one correction. All lanes stay in the DOM —
+  // culling would starve the measurement and reintroduce overlap.
+  useLayoutEffect(() => {
+    const layer = layerRef.current
+    if (layer === null) return
+    const next: Record<string, number> = {}
+    let changed = false
+    for (const el of Array.from(layer.querySelectorAll<HTMLElement>('.dshm-lane'))) {
+      const id = el.dataset.sessionId
+      if (id === undefined || id === '') continue
+      const height = el.offsetHeight
+      next[id] = height
+      if (Math.abs((measured[id] ?? 0) - height) > 1) changed = true
+    }
+    if (changed) setMeasured(current => ({ ...current, ...next }))
+  })
 
   const mergedOffsets = useMemo(() => {
     const merged: Record<string, { dx: number; dy: number }> = {}
@@ -363,17 +412,22 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     target.addEventListener('pointerup', onUp)
   }
 
-  const doJump = async (sessionId: string, seq: number | undefined) => {
-    if (actions === null || seq === undefined) {
+  const doJump = async (sessionId: string, messageId: string | null) => {
+    if (actions === null || messageId === null) {
       showToast('这张卡片还没有可跳转的轮次', 'error')
       return
     }
     const title = graph?.nodes.find(n => n.sessionId === sessionId)?.title ?? sessionId
     try {
-      const result = await actions.jump(sessionId, seq, title)
-      if (result === 'ok') onClose()
-      else if (result === 'session-not-in-sidebar') showToast('侧栏里找不到这个会话（可能被归档或折叠）', 'error')
-      else showToast('已打开会话，但没有定位到该轮次', 'error')
+      const result = await actions.jump(sessionId, messageId, title)
+      if (result === 'ok' || result === 'session-switched') {
+        onClose()
+        if (result === 'session-switched') showToast('已打开会话，但没定位到那一轮（已停在会话开头）', 'error')
+      } else if (result === 'session-not-in-sidebar') {
+        showToast('侧栏里找不到这个会话（可能被折叠或归档）', 'error')
+      } else {
+        showToast('跳转失败', 'error')
+      }
     } catch (cause) {
       showToast(`跳转失败：${String(cause)}`, 'error')
     }
@@ -385,6 +439,11 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
       await actions.followUp(sessionId, text)
       setFollowUpFor(null)
       showToast('追问已发送')
+      // The answer lands seconds later: pull the session's turns again when
+      // it should have completed (the running-flip path covers slow turns).
+      const apply = (list: TurnListDTO) => setTurns(current => new Map(current).set(sessionId, list))
+      window.setTimeout(() => refetchTurnInto(sessionId, apply), 4000)
+      window.setTimeout(() => refetchTurnInto(sessionId, apply), 12000)
     } catch (cause) {
       showToast(`追问失败：${cause instanceof Error ? cause.message : String(cause)}`, 'error')
     }
@@ -399,13 +458,6 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
       showToast(`分支失败：${cause instanceof Error ? cause.message : String(cause)}`, 'error')
     }
   }
-
-  // Viewport bounds in world coordinates for culling.
-  const bounds = useMemo(() => {
-    const x = -camera.x / camera.scale
-    const y = -camera.y / camera.scale
-    return { x1: x - CULL_MARGIN, y1: y - CULL_MARGIN, x2: x + viewSize.w / camera.scale + CULL_MARGIN, y2: y + viewSize.h / camera.scale + CULL_MARGIN }
-  }, [camera, viewSize])
 
   return (
     <div className="dshm-overlay" role="dialog" aria-label="会话地图">
@@ -431,8 +483,8 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
           <div className={`dshm-toast${toast.kind === 'error' ? ' is-error' : ''}`}>{toast.text}</div>
         ) : null}
         {layout !== null ? (
-          <div className="dshm-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})` }}>
-            {layout.groups.filter(group => group.y > bounds.y1 - 100 && group.y < bounds.y2).map(group => (
+          <div ref={layerRef} className="dshm-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})` }}>
+            {layout.groups.map(group => (
               <div key={group.id} className="dshm-group-label" style={{ top: group.y, left: 0, width: layout.width }}>
                 ▤ {group.title}
               </div>
@@ -445,11 +497,15 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
             {visibleGraph?.nodes.map(node => {
               const pos = layout.positions.get(node.sessionId)
               if (pos === undefined) return null
-              if (pos.x + CARD_W < bounds.x1 || pos.x > bounds.x2 || pos.y + pos.laneHeight < bounds.y1 || pos.y > bounds.y2) return null
               const list = turns.get(node.sessionId)
               const isSub = node.origin === 'subagent' || (node.delegationDepth ?? 0) > 0
               return (
-                <div key={node.sessionId} className={`dshm-lane${isSub ? ' is-sub' : ''}`} style={{ left: pos.x, top: pos.y, width: CARD_W }}>
+                <div
+                  key={node.sessionId}
+                  data-session-id={node.sessionId}
+                  className={`dshm-lane${isSub ? ' is-sub' : ''}`}
+                  style={{ left: pos.x, top: pos.y, width: CARD_W }}
+                >
                   <div
                     className={`dshm-session-title${actions !== null ? ' is-grabbable' : ''}`}
                     title={`${node.title}（拖拽移动）`}
@@ -465,7 +521,7 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
                   </div>
                   {actions !== null ? (
                     <div className="dshm-lane-actions">
-                      <button type="button" onClick={() => doJump(node.sessionId, list?.turns[0]?.startSeq)}>打开</button>
+                      <button type="button" onClick={() => doJump(node.sessionId, list?.turns[0]?.messageId ?? null)}>打开</button>
                       <button type="button" onClick={() => setFollowUpFor(current => (current === node.sessionId ? null : node.sessionId))}>追问</button>
                       <button type="button" onClick={() => doFork(node.sessionId, undefined)}>分支</button>
                     </div>
@@ -488,7 +544,7 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
                           <p
                             className="dshm-q"
                             title="点击跳转到原生对话的这一轮"
-                            onClick={() => doJump(node.sessionId, turn.startSeq)}
+                            onClick={() => doJump(node.sessionId, turn.messageId)}
                             style={actions !== null ? { cursor: 'pointer' } : undefined}
                           >
                             {turn.question}

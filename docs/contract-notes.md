@@ -93,3 +93,13 @@ window.__ModuleLoader__.load({
 2. **registration inject 的 hooks 通道在此版本不可用**：`register(meta, comp)` 的 meta.inject 返回 `{ hooks: { open: source } }` 时条目被静默丢弃（无报错、无 fiber）。可行替代：inject 返回稳定自定义 hook 函数作为普通 callback 成员（组件内 `useState`+`subscribe`），实测渲染正常。官方 ui-workspace 条目均通过宿主 SlotHookFactory 注入 hook，独立插件目前应走自定义 hook。
 3. **真实语料规模参考**：本机 9 会话（5 标题 + 4 空白），最大会话 320 事件/5 轮/38 步；`readSession` 单会话毫秒级，graph 接口全量 3.4KB，turns 接口按会话 2-3KB——M1 无需缓存层。
 4. **会话日志落盘为 `session.v4.jsonl.zstd`**（zstd 压缩，Node 内置 `zlib.zstdDecompressSync` 可读），调试时可直接解包。
+
+## M2/M3 运行时实测补充（2026-10-04，浏览器端到端验证）
+
+1. **client 服务清单**（`reflect.provide` 实测）：`sessions`、`layout`、`modules`、`pluginNavigation`、`sidebarRight(Tabs)`、`documentPreviews`、`resources`、`uiRenderer`、`userQuestionPanels`。**没有 workspaces 服务，也没有任何「切换当前会话视图」的公开 API**（`service.d.ts` L85 明示 view selection 在 Controller 之外）——跳转只能走 DOM 桥，见下。
+2. **`sessions` 服务可用面**（api-session-controller）：`create/fork({sessionId, atSeq, increaseTitle})/binding(id)/using(target,{source},op)/retain`；`binding(id).session.prompt(content,'queue')` 发消息。会话未实例化时 `binding` 为 undefined，可用 `using(id, {source:'mainView'}, …)` 按侧栏同款方式物化（原生代码实测 `source: "sidebarView"/"mainView"`）。
+3. **原生对话的轮次锚点**：chat DOM 渲染 `data-chat-anchor-key="<表面节点索引>:input-message<完整消息uuid>"`——**前缀不是事件 seq**（同一会话 8 条 user 消息全是 `13:`），稳定句柄是消息 uuid。`TurnDTO.messageId` 取自 `user/message` 事件的 `data.id`，定位选择器 `[data-chat-anchor-key$="input-message<uuid>"]`。
+4. **侧栏行匹配**：treeitem 无 aria-label，textContent = `标题+相对时间` 且**无空格**（"介绍 otty 工具1h"）；会存成 accessible name 时拼 "…Session actions for …"。行匹配必须剥掉 chrome 后整等，且 fork 行标题含 " (1)"，原会话与 fork 靠整等区分。列表截断时需点 "Show N more sessions" 展开。
+5. **追问后的卡片回流**：`prompt` 接受（`{accepted:true}`）≠ 已完成；地图侧需要两条刷新路径——`useSessions` 的 running 翻转（true→false）触发该会话 turns 重拉 + 发送成功后定时（4s/12s）回拉。只失效缓存不触发拉取是无效的（M2 实测踩坑）。
+6. **画布布局必须两遍实测**：卡片自然高度（~150px）远大于估算（114px），估算法在 fork 树上必然重叠；渲染后 `useLayoutEffect` 量 `offsetHeight` 回灌重排一遍即收敛。视口剔除与测量互相饿死（未渲染的泳道永远量不到），当前语料规模下全量渲染 + 实测是正确取舍。
+7. **`shell.overlay` 的 hooks 通道不可用而普通 callback 成员可用**（M1 已记）——稳定自定义 hook（useState+subscribe）作为 inject 成员传入，React 视角是普通 hook，实测可靠。

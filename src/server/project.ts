@@ -72,6 +72,7 @@ function describeError(value: unknown): string | null {
 
 interface MutableTurn {
   startSeq: number
+  messageId: string | null
   time: number
   question: string
   answerParts: string[]
@@ -108,6 +109,7 @@ export function buildTurns(log: RawSessionLog): TurnDTO[] {
       if (text.trim() === '') continue
       current = {
         startSeq: event.seq,
+        messageId: typeof data?.id === 'string' ? data.id : null,
         time: typeof event.time === 'number' ? event.time : 0,
         question: snippet(text, QUESTION_SNIPPET_LIMIT),
         answerParts: [],
@@ -197,6 +199,7 @@ export function buildTurns(log: RawSessionLog): TurnDTO[] {
 
   return turns.map(turn => ({
     startSeq: turn.startSeq,
+    messageId: turn.messageId,
     time: turn.time,
     question: turn.question,
     answer: snippet(turn.answerParts.join('\n\n'), ANSWER_SNIPPET_LIMIT),

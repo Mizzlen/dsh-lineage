@@ -7,6 +7,8 @@
 export interface TurnDTO {
   /** seq of the `user/message` event that opened the turn. */
   startSeq: number
+  /** Message id of the opening `user/message` (native chat anchor key). */
+  messageId: string | null
   /** Unix epoch ms of the opening user message. */
   time: number
   question: string

@@ -171,7 +171,7 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
 
   const actions: MapActions | null = ctx.sessions
     ? {
-        jump: (sessionId, seq, displayTitle) => openTurnInConversation(sessionId, seq, displayTitle),
+        jump: (sessionId, messageId, displayTitle) => openTurnInConversation(sessionId, messageId, displayTitle),
         followUp: (sessionId, text) => sendFollowUp(ctx.sessions as ClientSessionsFace, sessionId, text),
         forkAt: (sessionId, atSeq) => forkSessionAt(ctx.sessions as ClientSessionsFace, sessionId, atSeq),
       }
