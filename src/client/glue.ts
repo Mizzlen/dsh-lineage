@@ -91,9 +91,30 @@ export async function openTurnInConversation(
 
   // Row chrome stripping lives at module level (stripRowChrome /
   // stripRowChromeAggressive) — bilingual en/zh, unit-tested.
-  const findRow = (): HTMLDivElement | undefined => {
+  // Row title matching. Composed strings ("Completed" + title + "now", title
+  // + glued time) are fundamentally ambiguous when the title itself ends in
+  // a digit ("测试 1" + "1分钟" = "测试 11分钟", decomposable both ways) — so
+  // the primary pass matches the row's TITLE LEAF ELEMENT instead: native
+  // rows render the title as its own text node, exact and chrome-free.
+  // Chrome leaves (status words, bare timestamps) never match a title.
+  const isGroupRow = (el: Element) => el.getAttribute('aria-expanded') !== null
+  const isChromeLeaf = (text: string) =>
+    /^(?:completed|running|errored|error|cancelled|canceled|queued|waiting|pinned|archived|已完成|运行中|出错|已取消|排队中|已置顶|已归档|now|刚刚|\d+(?:min|s|h|d|w)|\d+(?:秒钟?|分钟|小时|天|周|个月|月|年))$/i.test(text)
+  const findByLeaf = (): HTMLDivElement | undefined => {
     const items = Array.from(document.querySelectorAll<HTMLDivElement>('[role="treeitem"]'))
+    return items.find(item =>
+      !isGroupRow(item) &&
+      Array.from(item.querySelectorAll('*')).some(el =>
+        el.children.length === 0 && (el.textContent ?? '').trim() === wanted && !isChromeLeaf(wanted)))
+  }
+  const findRow = (): HTMLDivElement | undefined => {
     if (wanted === '') return undefined
+    // Pass A: title-leaf exact match.
+    const byLeaf = findByLeaf()
+    if (byLeaf !== undefined) return byLeaf
+    // Pass B/C: composed string with chrome stripped — for rows whose title
+    // is split across several leaf elements and has no single title leaf.
+    const items = Array.from(document.querySelectorAll<HTMLDivElement>('[role="treeitem"]'))
     return items.find(item => stripRowChrome(item.getAttribute('aria-label') ?? item.textContent ?? '') === wanted)
       ?? items.find(item => stripRowChromeAggressive(item.getAttribute('aria-label') ?? item.textContent ?? '') === wanted)
   }
