@@ -111,6 +111,8 @@ window.__ModuleLoader__.load({
 3. **Host 侧 rename 严格按 id 隔离**（源码核验 + 实测）：`resolveAgent(sessionId)` → `resumeObserved` 在 `observation.header.id !== sessionId` 时直接抛 `ApiSessionNotFound`；`AgentRegistry.enter` 要求 `agent.id === agent.session.id`；`sessionTitle.rename(session, …)` 只向 `session.id` 的日志追加 `session/title`（source=user，且会 supersede 在飞的 LLM 自动命名并 pin 标题）。**给懒分支存根改名（PUT /mapper/api/branches/:id）只写 branch-store JSON，父会话标题事件纹丝不动**——2026-10-05 浏览器端到端实测确认。
 4. **web profile 宿主进程启动时加载 lib/index.js，之后不随文件变化热更**：改服务端代码后必须重启 `dsh --profile web`；client bundle（lib/client.js）则是每次页面刷新现取的。排查"接口字段缺失"时先分辨这两侧。
 5. **fork 子会话的工作区归属可能滞后于注册表**：新 fork 的 child 可能落进 cwd 桶（graph 的 workspaceId 为 `cwd:…`）而非父会话的注册表工作区，会话中心视角（工作区隔离）会暂时看不到它。属 v0.0.2 归属行为，非回归。
+6. **画布图层渲染（2026-10-05）**：`.dshm-layer` 禁止常驻 `will-change: transform`——Chromium 对 will-change 图层冻结 raster scale，缩放只是纹理上采样（放大即糊）；去掉后每帧按当前 scale 重栅格化，文字/SVG 边保持矢量清晰。图层提升只在拖拽平移期间（`.is-panning`）临时恢复——平移不改变 raster scale。同批：`.dshm-overlay` 全局 `user-select:none`（阅读浮层与追问输入恢复 `text`），画布拖拽不再选走顶栏文本。
+7. **BranchStore 缓存会复活绕过 API 的盘改（2026-10-05）**：宿主进程持有 branch-store 的内存 cache，直接编辑磁盘 JSON 后，任何一次经 API 的写入（如 create）都会把 cache 里的旧数据整份 persist 回盘。清理存根必须走 `DELETE /mapper/api/branches/:id`（或先停宿主再改盘）。
 
 ## Desktop（Electron）安装实测（2026-10-04）
 

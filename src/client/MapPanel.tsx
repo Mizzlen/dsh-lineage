@@ -195,7 +195,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
     /** Screen rect of the clicked card: the float card animates out of it. */
     sourceRect: { left: number; top: number; width: number; height: number }
   } | null>(null)
-  const [inputFor, setInputFor] = useState<{ kind: 'followup' | 'rename' | 'renameBranch' | 'activate'; sessionId: string } | null>(null)
+  const [inputFor, setInputFor] = useState<{ kind: 'followup' | 'rename' | 'renameBranch' | 'activate'; sessionId: string; seq: number | null } | null>(null)
   const [readerLoading, setReaderLoading] = useState(false)
 
   // Merge lazy-branch stubs into the graph as pending nodes: they inherit the
@@ -241,6 +241,10 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
   const layerRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ startX: number; startY: number; camX: number; camY: number } | null>(null)
   const toastTimer = useRef(0)
+  // Title/card single clicks wait out a possible double click; a lane drag
+  // that ends on the title suppresses the synthetic click entirely.
+  const clickTimer = useRef(0)
+  const dragMovedRef = useRef(false)
 
   const showToast = useCallback((text: string, kind: 'ok' | 'error' = 'ok') => {
     setToast({ text, kind })
@@ -497,6 +501,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
 
   const startLaneDrag = (event: React.PointerEvent, node: NodeDTO) => {
     if (event.button !== 0 || actions === null) return
+    dragMovedRef.current = false
     const pos = layout?.positions.get(node.sessionId)
     const autoX = pos !== undefined ? pos.x - (mergedOffsets[node.sessionId]?.dx ?? 0) : 0
     const autoY = pos !== undefined ? pos.y - (mergedOffsets[node.sessionId]?.dy ?? 0) : 0
@@ -517,7 +522,9 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
       const dx = Math.round(origin.dx + (pointer.clientX - start.x) / camera.scale)
       const dy = Math.round(origin.dy + (pointer.clientY - start.y) / camera.scale)
       setDrag(null)
-      if (node.workspaceId !== null && (dx !== origin.dx || dy !== origin.dy)) {
+      // A drag that ends on the title must not read as its click (open).
+      dragMovedRef.current = dx !== origin.dx || dy !== origin.dy
+      if (node.workspaceId !== null && dragMovedRef.current) {
         onOffsetChange(node.workspaceId, node.sessionId, dx, dy)
       }
     }
@@ -677,7 +684,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
           <button type="button" className="dshm-btn" onClick={() => setShowSubagents(value => !value)}>
             {showSubagents ? '隐藏 subagent' : '显示 subagent'}
           </button>
-          <span className="dshm-hint">{scope === 'session' ? '会话视角（血缘邻域）· ' : '工作区视角 · '}滚轮缩放 · Shift/Alt+滚轮平移 · 拖拽标题移动泳道 · 双击复位</span>
+          <span className="dshm-hint">{scope === 'session' ? '会话视角（血缘邻域）· ' : '工作区视角 · '}滚轮缩放 · Shift/Alt+滚轮平移 · 拖拽标题移动泳道 · 标题单击打开/双击改名 · 双击卡片展开阅读 · 双击空白复位</span>
           {loading ? <span className="dshm-hint">加载中…</span> : null}
           {error !== null ? <span className="dshm-hint" style={{ color: '#b42323' }}>{error}</span> : null}
         </div>
@@ -710,42 +717,36 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                 >
                   <div
                     className={`dshm-session-title${actions !== null ? ' is-grabbable' : ''}`}
-                    title={`${node.title}（拖拽移动）`}
+                    title={node.pending === true ? `${node.title}（双击改名 · 拖拽移动）` : `${node.title}（单击打开 · 双击改名 · 拖拽移动）`}
                     onPointerDown={event => {
                       // Only the bare header starts a drag; buttons inside opt out.
                       if ((event.target as Element).closest('button') === null) startLaneDrag(event, node)
+                    }}
+                    onClick={event => {
+                      if (actions === null || node.pending === true) return
+                      if ((event.target as Element).closest('button') !== null) return
+                      if (dragMovedRef.current) { dragMovedRef.current = false; return }
+                      // 单击打开：等一拍让位给双击改名。
+                      window.clearTimeout(clickTimer.current)
+                      clickTimer.current = window.setTimeout(() => { void doJump(node.sessionId, list?.turns[0]?.messageId ?? null) }, 260)
+                    }}
+                    onDoubleClick={event => {
+                      if ((event.target as Element).closest('button') !== null) return
+                      event.stopPropagation()
+                      window.clearTimeout(clickTimer.current)
+                      if (actions === null) return
+                      setInputFor(current => (current?.sessionId === node.sessionId && (current.kind === 'rename' || current.kind === 'renameBranch') ? null : { kind: node.pending === true ? 'renameBranch' : 'rename', sessionId: node.sessionId, seq: null }))
                     }}
                   >
                     {isSub ? '[sub] ' : ''}
                     {node.pending === true ? '◇ ' : node.isSeeded ? '⑂ ' : ''}
                     {node.title}
                     {runningById[node.sessionId] === true ? <span className="dshm-badge is-running">运行中</span> : null}
+                    {node.pending === true && actions !== null ? (
+                      <button type="button" className="dshm-title-x" title="删除分支存根" onClick={() => doDeleteBranch(node.sessionId)}>✕</button>
+                    ) : null}
                   </div>
-                  {actions !== null ? (
-                    <div className="dshm-lane-actions">
-                      {node.pending === true ? null : (
-                        <button type="button" onClick={() => doJump(node.sessionId, list?.turns[0]?.messageId ?? null)}>打开</button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === (node.pending === true ? 'activate' : 'followup') ? null : { kind: node.pending === true ? 'activate' : 'followup', sessionId: node.sessionId }))}
-                      >
-                        追问
-                      </button>
-                      {node.pending === true ? (
-                        <>
-                          <button type="button" onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === 'renameBranch' ? null : { kind: 'renameBranch', sessionId: node.sessionId }))}>改名</button>
-                          <button type="button" onClick={() => doDeleteBranch(node.sessionId)}>✕</button>
-                        </>
-                      ) : (
-                        <>
-                          <button type="button" onClick={() => doCreateBranch(node, null)}>分支</button>
-                          <button type="button" onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === 'rename' ? null : { kind: 'rename', sessionId: node.sessionId }))}>改名</button>
-                        </>
-                      )}
-                    </div>
-                  ) : null}
-                  {inputFor !== null && inputFor.sessionId === node.sessionId ? (
+                  {inputFor !== null && inputFor.sessionId === node.sessionId && (inputFor.kind === 'rename' || inputFor.kind === 'renameBranch') ? (
                     inputFor.kind === 'renameBranch' ? (
                       <InputRow
                         placeholder="新的分支名…（Enter 确认）"
@@ -753,21 +754,13 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                         onSend={(text: string) => doRenameBranch(node.sessionId, text)}
                         onCancel={() => setInputFor(null)}
                       />
-                    ) : inputFor.kind === 'rename' ? (
+                    ) : (
                       <InputRow
                         placeholder="新的会话标题…（Enter 确认）"
                         initial={node.title}
                         onSend={(text: string) => doRenameSession(node.sessionId, text)}
                         onCancel={() => setInputFor(null)}
                       />
-                    ) : inputFor.kind === 'activate' ? (
-                      <FollowUpInput
-                        placeholder="第一次追问——此刻才真正创建这个分支的会话"
-                        onSend={(text: string) => doActivateBranch(branches.find(b => b.id === node.sessionId) as PendingBranchDTO, text)}
-                        onCancel={() => setInputFor(null)}
-                      />
-                    ) : (
-                      <FollowUpInput onSend={(text: string) => doFollowUp(node.sessionId, text)} onCancel={() => setInputFor(null)} />
                     )
                   ) : null}
                   {list === undefined ? (
@@ -775,29 +768,59 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                   ) : list.turns.length === 0 ? (
                     <div className="dshm-card">
                       <span className="dshm-loading">{node.pending === true ? '等待第一次追问——届时才创建会话' : '（无投影轮次：空白或全部为注入内容）'}</span>
+                      {node.pending === true && actions !== null ? (
+                        <div className="dshm-chips">
+                          <button
+                            type="button"
+                            className="dshm-chip is-ask"
+                            onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === 'activate' ? null : { kind: 'activate', sessionId: node.sessionId, seq: null }))}
+                          >
+                            追问
+                          </button>
+                        </div>
+                      ) : null}
+                      {inputFor !== null && inputFor.kind === 'activate' && inputFor.sessionId === node.sessionId ? (
+                        <FollowUpInput
+                          placeholder="第一次追问——此刻才真正创建这个分支的会话"
+                          onSend={(text: string) => doActivateBranch(branches.find(b => b.id === node.sessionId) as PendingBranchDTO, text)}
+                          onCancel={() => setInputFor(null)}
+                        />
+                      ) : null}
                     </div>
                   ) : (
                     list.turns.map(turn => {
                       const badge = statusBadge(turn)
                       const failed = turn.tools.filter(tool => !tool.ok).length
                       const pendingApproval = turn.approvals.filter(a => a.pending).length
-                      const expandable = turn.answer !== '' || turn.question.length > 120
                       return (
-                        <div key={turn.startSeq} data-seq={turn.startSeq} className={`dshm-card${turn.status === 'error' ? ' is-error' : ''}`}>
+                        <div
+                          key={turn.startSeq}
+                          data-seq={turn.startSeq}
+                          className={`dshm-card${turn.status === 'error' ? ' is-error' : ''}`}
+                          onClick={event => {
+                            const target = event.target as Element
+                            if (target.closest('button') !== null || target.closest('.dshm-followup') !== null) return
+                            if (actions === null || target.closest('.dshm-q') === null) return
+                            if (dragMovedRef.current) { dragMovedRef.current = false; return }
+                            // 单击问题跳转：与双击展开阅读共享裁决定时器。
+                            window.clearTimeout(clickTimer.current)
+                            clickTimer.current = window.setTimeout(() => { void doJump(node.sessionId, turn.messageId) }, 260)
+                          }}
+                          onDoubleClick={event => {
+                            const target = event.target as Element
+                            if (target.closest('button') !== null || target.closest('.dshm-followup') !== null) return
+                            event.stopPropagation()
+                            window.clearTimeout(clickTimer.current)
+                            if (actions === null) return
+                            openReader(node.sessionId, turn, event.currentTarget)
+                          }}
+                        >
                           {badge !== null ? <span className={`dshm-badge ${badge.className}`}>{badge.label}</span> : null}
-                          <p
-                            className="dshm-q"
-                            title={actions !== null ? '点击跳转到原生对话的这一轮' : undefined}
-                            onClick={() => doJump(node.sessionId, turn.messageId)}
-                            style={actions !== null ? { cursor: 'pointer' } : undefined}
-                          >
+                          <p className="dshm-q" title={actions !== null ? '单击跳转到原生对话的这一轮 · 双击展开阅读' : undefined}>
                             {turn.question}
                           </p>
                           {turn.answer !== '' ? <p className="dshm-a">{turn.answer}</p> : null}
                           <div className="dshm-chips">
-                            {expandable && actions !== null ? (
-                              <button type="button" className="dshm-chip is-expand" onClick={event => openReader(node.sessionId, turn, (event.currentTarget as HTMLElement).closest('.dshm-card'))}>展开阅读</button>
-                            ) : null}
                             {turn.tools.slice(0, 4).map((tool, index) => (
                               <span key={index} className={`dshm-chip${tool.ok ? '' : ' is-fail'}`}>{tool.name}</span>
                             ))}
@@ -806,9 +829,29 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                             {turn.todoCount > 0 ? <span className="dshm-chip">todo×{turn.todoCount}</span> : null}
                             {pendingApproval > 0 ? <span className="dshm-chip is-warn">{pendingApproval} 待审批</span> : null}
                             {actions !== null ? (
-                              <button type="button" className="dshm-chip is-branch" onClick={() => doCreateBranch(node, turn.startSeq)}>⎇ 从此分支</button>
+                              <button
+                                type="button"
+                                className="dshm-chip is-ask"
+                                title="就这个会话继续追问"
+                                onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === 'followup' && current.seq === turn.startSeq ? null : { kind: 'followup', sessionId: node.sessionId, seq: turn.startSeq }))}
+                              >
+                                追问
+                              </button>
                             ) : null}
                           </div>
+                          {inputFor !== null && inputFor.kind === 'followup' && inputFor.sessionId === node.sessionId && inputFor.seq === turn.startSeq ? (
+                            <FollowUpInput onSend={(text: string) => doFollowUp(node.sessionId, text)} onCancel={() => setInputFor(null)} />
+                          ) : null}
+                          {actions !== null ? (
+                            <button
+                              type="button"
+                              className="dshm-branch-btn"
+                              title="从此分支（从这一轮分叉，连线由此按钮引出）"
+                              onClick={() => doCreateBranch(node, turn.startSeq)}
+                            >
+                              &gt;
+                            </button>
+                          ) : null}
                         </div>
                       )
                     })
