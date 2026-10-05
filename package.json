@@ -1,5 +1,5 @@
 {
-  "name": "dsh-mapper",
+  "name": "dsh-lineage",
   "version": "0.1.0",
   "description": "A visual conversation map plugin for DeepSeek Harness: sessions, follow-ups and forks as one navigable canvas.",
   "keywords": [

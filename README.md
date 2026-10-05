@@ -1,4 +1,4 @@
-# dsh-mapper
+# dsh-lineage
 
 [README 中文](README.zh-CN.md)
 
@@ -15,9 +15,9 @@ A visual conversation map plugin for DeepSeek Harness: sessions, follow-ups and 
 - **Card interactions**: single click on the question jumps to that turn; **double click on the card background** opens expanded reading — the card rises to the foreground center over a dimmed backdrop (same markdown spec as the native page, via `src/client/markdown.ts`), wheel scrolls the float only; the **circular ">" on the card's right edge is "branch from this turn"** — the fork edge leaves from that button and lands on the cut's card.
 - **Context inheritance follows the map's edges**: the branch cut is the branch turn's `turn/end` — the child inherits the WHOLE turn (question + answer + tools) and the ask card's text lands as the next user message; materialized forks resolve the cut from the child log's inherited prefix length (`inheritedEventCount`). Both edge kinds leave from the cut card's ">" button, never the lane header.
 - **Jump lifecycle**: the row bridge takes a cancellation token — closing the map or starting a new jump cancels in-flight bridge walks (retries, scrolling, row clicks), so nothing fires late; failures dump full row-label evidence via `__dshmJumpDebug`.
-- **Lazy branches**: ">" only records a stub (dashed ◇ lane; ✕ in the title bar deletes, double click renames). Stubs are pure view metadata under `$DSH_HOME/dsh-mapper/branches/` and never touch any DSH session.
+- **Lazy branches**: ">" only records a stub (dashed ◇ lane; ✕ in the title bar deletes, double click renames). Stubs are pure view metadata under `$DSH_HOME/dsh-lineage/branches/` and never touch any DSH session.
 - **Read-only map**: lane = session (title + running badge), card = one turn (question, answer snippet, tool chips, failure count, cancelled/error badges, pending-approval chips), SVG curves = fork lineage edges (from `SessionHeader.parentSession`).
-- **Layout persistence**: drag lane headers; offsets are stored per workspace under `$DSH_HOME/dsh-mapper/layout/` (view metadata only).
+- **Layout persistence**: drag lane headers; offsets are stored per workspace under `$DSH_HOME/dsh-lineage/layout/` (view metadata only).
 - **Subagent toggle**, live running status, wheel zoom / shift-alt pan / drag pan / double-click-on-empty reset; panning never sweeps text selection and zoom stays vector-crisp.
 
 ## Compatibility
@@ -33,18 +33,18 @@ dsh --profile web --dump-config
 dsh --profile web
 ```
 
-Open any session → the 「会话地图」 header button → the map overlay. Host API: `GET /mapper/api/graph`, `GET /mapper/api/sessions/:id/turns`, `GET|PUT /mapper/api/layout/:workspaceId`, `GET /mapper/api/health`.
+Open any session → the 「会话地图」 header button → the map overlay. Host API: `GET /lineage/api/graph`, `GET /lineage/api/sessions/:id/turns`, `GET|PUT /lineage/api/layout/:workspaceId`, `GET /lineage/api/health`.
 
 ## Configuration (cordis.patch.yml)
 
 | Field | Default | Meaning |
 |---|---|---|
-| `dataDir` | `$DSH_HOME/dsh-mapper` | Lane-offset storage directory (view metadata only) |
+| `dataDir` | `$DSH_HOME/dsh-lineage` | Lane-offset storage directory (view metadata only) |
 | `trustedHosts` | `[]` | Extra accepted Host names for proxied deployments (localhost always allowed) |
 
 ## Disable / uninstall
 
-`dsh plugin --profile web remove dsh-mapper`. Only `$DSH_HOME/dsh-mapper/` (offset data) remains; session data is untouched.
+`dsh plugin --profile web remove dsh-lineage`. Only `$DSH_HOME/dsh-lineage/` (offset data) remains; session data is untouched.
 
 ## Known limits
 

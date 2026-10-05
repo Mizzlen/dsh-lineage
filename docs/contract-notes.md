@@ -1,4 +1,4 @@
-# dsh-mapper 契约核对记录（T0.3）
+# dsh-lineage 契约核对记录（T0.3）
 
 > 核对日期：2026-10-04。目标版本：**DSH 0.2.0-rc.2**（npm `latest`，本机全局安装并已启动 web profile）。
 > 核对方式：优先读取**本机已安装的目标版本源码/类型声明**（`/opt/homebrew/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/`，下称 `$DSH_PKG`），其次项目内文档 `docs/harness/`。
@@ -74,7 +74,7 @@ window.__ModuleLoader__.load({
 
 模块级导出契约：`inject`（服务名数组，如 `['slots']`）+ `apply(ctx)`；`slots` 服务由 `dsh-client-ui-renderer` 构造（其 lib/client.js `super(ctx, "slots")`）。manifest 模板参照 web-search 包的 `dsh.client` 声明。
 
-**dsh-mapper 等价构建**（scripts/build.mjs）：esbuild `--format=cjs --bundle --platform=browser`，external = `react*` 与 `@deepseek-ai/*`（走 loader require），产物包裹进上述 factory；构建后断言产物含精确包名与 `__ModuleLoader__.load`。
+**dsh-lineage 等价构建**（scripts/build.mjs）：esbuild `--format=cjs --bundle --platform=browser`，external = `react*` 与 `@deepseek-ai/*`（走 loader require），产物包裹进上述 factory；构建后断言产物含精确包名与 `__ModuleLoader__.load`。
 
 ## 附：其他运行时事实
 
@@ -108,11 +108,11 @@ window.__ModuleLoader__.load({
 
 1. **fork 切点的权威来源是 `SessionLogSnapshot.inheritedEventCount`**（`dsh-session-query` types.d.ts L26-27）：`readSession` 返回顶层字段，`seedSeq = inheritedEventCount − 1` 恰好等于 fork 请求的 `atSeq`（包含式切点）。无需扫 `session/end-seed` 事件。
 2. **`sessions.fork`（ClientSessions 门面）返回 childId 字符串**，不是 manager 层的 RemoteResult；`increaseTitle: true` 由门面在 fork 后对 **child** 追加一次 user 改名（"标题 (N)"，日志可见 seq 147/149/151 连续 (1)(2)(3) 均为 child 上的激活重名痕迹）。失败抛 `SessionForkError`。
-3. **Host 侧 rename 严格按 id 隔离**（源码核验 + 实测）：`resolveAgent(sessionId)` → `resumeObserved` 在 `observation.header.id !== sessionId` 时直接抛 `ApiSessionNotFound`；`AgentRegistry.enter` 要求 `agent.id === agent.session.id`；`sessionTitle.rename(session, …)` 只向 `session.id` 的日志追加 `session/title`（source=user，且会 supersede 在飞的 LLM 自动命名并 pin 标题）。**给懒分支存根改名（PUT /mapper/api/branches/:id）只写 branch-store JSON，父会话标题事件纹丝不动**——2026-10-05 浏览器端到端实测确认。
+3. **Host 侧 rename 严格按 id 隔离**（源码核验 + 实测）：`resolveAgent(sessionId)` → `resumeObserved` 在 `observation.header.id !== sessionId` 时直接抛 `ApiSessionNotFound`；`AgentRegistry.enter` 要求 `agent.id === agent.session.id`；`sessionTitle.rename(session, …)` 只向 `session.id` 的日志追加 `session/title`（source=user，且会 supersede 在飞的 LLM 自动命名并 pin 标题）。**给懒分支存根改名（PUT /lineage/api/branches/:id）只写 branch-store JSON，父会话标题事件纹丝不动**——2026-10-05 浏览器端到端实测确认。
 4. **web profile 宿主进程启动时加载 lib/index.js，之后不随文件变化热更**：改服务端代码后必须重启 `dsh --profile web`；client bundle（lib/client.js）则是每次页面刷新现取的。排查"接口字段缺失"时先分辨这两侧。
 5. **fork 子会话的工作区归属可能滞后于注册表**：新 fork 的 child 可能落进 cwd 桶（graph 的 workspaceId 为 `cwd:…`）而非父会话的注册表工作区，会话中心视角（工作区隔离）会暂时看不到它。属 v0.0.2 归属行为，非回归。
 6. **画布图层渲染（2026-10-05）**：`.dshm-layer` 禁止常驻 `will-change: transform`——Chromium 对 will-change 图层冻结 raster scale，缩放只是纹理上采样（放大即糊）；去掉后每帧按当前 scale 重栅格化，文字/SVG 边保持矢量清晰。图层提升只在拖拽平移期间（`.is-panning`）临时恢复——平移不改变 raster scale。同批：`.dshm-overlay` 全局 `user-select:none`（阅读浮层与追问输入恢复 `text`），画布拖拽不再选走顶栏文本。
-7. **BranchStore 缓存会复活绕过 API 的盘改（2026-10-05）**：宿主进程持有 branch-store 的内存 cache，直接编辑磁盘 JSON 后，任何一次经 API 的写入（如 create）都会把 cache 里的旧数据整份 persist 回盘。清理存根必须走 `DELETE /mapper/api/branches/:id`（或先停宿主再改盘）。
+7. **BranchStore 缓存会复活绕过 API 的盘改（2026-10-05）**：宿主进程持有 branch-store 的内存 cache，直接编辑磁盘 JSON 后，任何一次经 API 的写入（如 create）都会把 cache 里的旧数据整份 persist 回盘。清理存根必须走 `DELETE /lineage/api/branches/:id`（或先停宿主再改盘）。
 8. **侧栏行 chrome 的完整形态与折叠组（2026-10-05，v0.0.6 跳转修复）**：
    - 活动/刚结束会话的行文本 = `Completed` + 标题 + `now` **三段无分隔粘合**（"Completed标题now"）——安全剥离（Session actions 尾巴 + 数字时间）剥不掉，父子互跳因此整等失败；跳转桥改为两段式：安全剥离整等失败后再用激进剥离（状态词前缀 `completed|running|errored|…` + 尾部 `now`）整等。
    - fork 子会话可能落在侧栏 **"Ungrouped" 组**（cwd 桶归属），该组默认折叠——折叠组的行不在 DOM 上，只扫 `[role="treeitem"]` 永远找不到。桥在匹配失败时先点击所有 `[role="treeitem"][aria-expanded="false"]` 展开组再重扫。两者合起来修复"从父进入点子 / 从子进入点父都报找不到会话"。
@@ -126,5 +126,5 @@ window.__ModuleLoader__.load({
 - Desktop = `/Applications/DeepSeek Harness.app`，与 CLI **共用 `~/.dsh`**（同一 sessions/storages），启动 `~/.dsh/profiles/desktop`（bundle 栈 = `dsh-base` + `dsh-web-app`），内嵌同一套 web 栈并监听 `127.0.0.1:19387`（带与 web 相同的 token 鉴权 fence）。
 - `dsh plugin --profile desktop …` 被拒：`profile "desktop" is managed exclusively by the Electron application`。
 - **手工安装（改 package.json bundles/deps + node_modules 软链）会让 desktop host 启动挂起**：只要 profile 目录里存在 `node_modules`（完整 pnpm install 或裸 symlink 均复现），host 进程起得来但永不监听端口；移除 node_modules 后立即恢复。仅改 manifest（无 node_modules）能正常启动但行无法解析、被静默忽略（路由 404）。
-- 结论：Desktop 的受支持安装路径是**应用内**的 Plugins 页（或 creator 模式 agent 的 `plugin_manager` 工具），由应用自己的 reconciler 处理依赖。dsh-mapper 尚未装入 desktop；待用户走应用内流程。
+- 结论：Desktop 的受支持安装路径是**应用内**的 Plugins 页（或 creator 模式 agent 的 `plugin_manager` 工具），由应用自己的 reconciler 处理依赖。dsh-lineage 尚未装入 desktop；待用户走应用内流程。
 - 注意：Desktop renderer 若经 `dsh-app://` scheme 发起 fetch，Host 头可能不是 localhost——届时把实际 host 加进 cordis.patch.yml 的 `trustedHosts` 即可（配置已预留）。

@@ -1,7 +1,7 @@
 import { build } from 'esbuild'
 import { mkdir, writeFile } from 'node:fs/promises'
 
-const CLIENT_ID = 'dsh-mapper'
+const CLIENT_ID = 'dsh-lineage'
 // Loader-resolved externals: react* and all dsh client packages come from the
 // page's module table via the factory `require`, never from our bundle.
 const externals = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/*']

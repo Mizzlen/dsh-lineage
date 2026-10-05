@@ -1,4 +1,4 @@
-# dsh-mapper 会话地图
+# dsh-lineage 会话地图
 
 [English](README.md) | 中文
 
@@ -15,9 +15,9 @@ DeepSeek Harness 的可视化会话地图插件：把同一工作区下的会话
 - **卡片交互**：单击问题文字跳转原生对话的那一轮；**双击卡片背景展开阅读**——卡片上浮至前景中心、背景压暗，浮层内滚轮只滚正文；**右缘圆形「>」=「从此分支」**，fork 连线即从此按钮引出、直连对应轮次卡片。
 - **上下文继承对应地图边**：分支切点 = 该轮 `turn/end`——子会话继承"问题+回答+工具"的**完整一轮**，追问卡的话作为下一轮用户消息；已物化的 fork 会话经日志继承前缀长度（`inheritedEventCount`）解析切点，两种来源的边都从切点卡片的「>」按钮位置出发。
 - **跳转生命周期**：跳转桥带取消令牌——关闭地图或发起新跳转会取消在飞的桥操作（重试、滚动、行点击），不再滞留到之后误触切换；失败时 `__dshmJumpDebug` 输出完整行文案证据。
-- **懒分支**：点「>」只记录存根（虚线 ◇ 泳道，标题栏 ✕ 删除、双击改名），**不创建会话**。存根只是 `$DSH_HOME/dsh-mapper/branches/` 里的视图元数据，对任何 DSH 会话零影响。
+- **懒分支**：点「>」只记录存根（虚线 ◇ 泳道，标题栏 ✕ 删除、双击改名），**不创建会话**。存根只是 `$DSH_HOME/dsh-lineage/branches/` 里的视图元数据，对任何 DSH 会话零影响。
 - **只读地图**：泳道 = 会话（标题 + 运行中徽标），卡片 = 一轮问答（提问、回答摘要、工具 chips、失败计数、取消/出错徽标、待审批徽标），SVG 曲线 = fork 血缘边。
-- **布局持久化**：拖拽泳道标题移动位置，偏移按工作区存到 `$DSH_HOME/dsh-mapper/layout/`（仅视图元数据）。
+- **布局持久化**：拖拽泳道标题移动位置，偏移按工作区存到 `$DSH_HOME/dsh-lineage/layout/`（仅视图元数据）。
 - **subagent 开关**：顶栏一键隐藏/显示委派子会话泳道；macOS 下顶栏自动避开窗口红绿灯。
 - **实时状态**：会话列表/运行态来自标准 hooks；某会话运行结束自动失效其卡片缓存并刷新。
 - 滚轮缩放、Shift/Alt+滚轮与拖拽平移、双击空白复位；地图内拖拽不会选走任何文本，放大始终保持矢量清晰。
@@ -31,22 +31,22 @@ DeepSeek Harness 的可视化会话地图插件：把同一工作区下的会话
 
 ```sh
 dsh plugin --profile web add ./
-dsh --profile web --dump-config   # 应出现 dsh-mapper 层
+dsh --profile web --dump-config   # 应出现 dsh-lineage 层
 dsh --profile web
 ```
 
-打开任意会话 → header 上的「会话地图」按钮 → 地图全屏展开。Host API：`GET /mapper/api/graph`、`GET /mapper/api/sessions/:id/turns`、`GET|PUT /mapper/api/layout/:workspaceId`、`GET /mapper/api/health`。
+打开任意会话 → header 上的「会话地图」按钮 → 地图全屏展开。Host API：`GET /lineage/api/graph`、`GET /lineage/api/sessions/:id/turns`、`GET|PUT /lineage/api/layout/:workspaceId`、`GET /lineage/api/health`。
 
 ## 配置（cordis.patch.yml）
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `dataDir` | `$DSH_HOME/dsh-mapper` | 泳道偏移存储目录（仅视图元数据） |
+| `dataDir` | `$DSH_HOME/dsh-lineage` | 泳道偏移存储目录（仅视图元数据） |
 | `trustedHosts` | `[]` | 额外放行的 Host 名（localhost 恒放行），用于反向代理部署 |
 
 ## 禁用 / 卸载
 
-`dsh plugin --profile web remove dsh-mapper`。卸载后留下的只有 `$DSH_HOME/dsh-mapper/`（偏移数据），删除即可彻底清理；会话数据无任何影响。
+`dsh plugin --profile web remove dsh-lineage`。卸载后留下的只有 `$DSH_HOME/dsh-lineage/`（偏移数据），删除即可彻底清理；会话数据无任何影响。
 
 ## 已知边界
 

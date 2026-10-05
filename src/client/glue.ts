@@ -184,7 +184,7 @@ export async function openTurnInConversation(
       collapsedGroups: document.querySelectorAll('[role="treeitem"][aria-expanded="false"]').length,
       rowLabels: items.map(item => (item.getAttribute('aria-label') ?? item.textContent ?? '').slice(0, 120)),
     }
-    console.warn('[dsh-mapper] jump target row not found; see window.__dshmJumpDebug', (window as any).__dshmJumpDebug)
+    console.warn('[dsh-lineage] jump target row not found; see window.__dshmJumpDebug', (window as any).__dshmJumpDebug)
     return 'session-not-in-sidebar'
   }
 

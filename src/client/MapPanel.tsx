@@ -28,7 +28,7 @@ function fetchTurns(sessionId: string, full = false): Promise<TurnListDTO> {
   let entry = cache.get(sessionId)
   if (entry === undefined) {
     entry = {
-      promise: fetch(`/mapper/api/sessions/${sessionId}/turns${full ? '?full=1' : ''}`).then(r => r.json() as Promise<TurnListDTO>),
+      promise: fetch(`/lineage/api/sessions/${sessionId}/turns${full ? '?full=1' : ''}`).then(r => r.json() as Promise<TurnListDTO>),
     }
     cache.set(sessionId, entry)
   }

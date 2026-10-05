@@ -90,7 +90,7 @@ export interface GraphDTO {
 
 export interface HealthReport {
   ok: true
-  plugin: 'dsh-mapper'
+  plugin: 'dsh-lineage'
   version: string
 }
 

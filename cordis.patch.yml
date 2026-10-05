@@ -1,11 +1,11 @@
-# dsh-mapper only extends the Web profile: it reuses the running DSH server
+# dsh-lineage only extends the Web profile: it reuses the running DSH server
 # and the existing Web client module system (no second process, no iframe).
 - insert:
-    - id: dsh-mapper
-      name: dsh-mapper
+    - id: dsh-lineage
+      name: dsh-lineage
       config:
         # Lane-offset persistence lives under the DSH home so uninstalling the
         # plugin leaves only this view-metadata directory behind.
-        dataDir: !!js dshHomePath('dsh-mapper')
+        dataDir: !!js dshHomePath('dsh-lineage')
         # Extra host authorities the /mapper API accepts besides localhost.
         trustedHosts: []

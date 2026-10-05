@@ -1,4 +1,4 @@
-// dsh-mapper host face.
+// dsh-lineage host face.
 // Reads the durable session corpus through the documented seams
 // (ctx.sessionQuery, ctx.workspaceRegistry — docs/contract-notes.md §b/§c) and
 // serves it to the Web client map. The plugin stores nothing on the Host
@@ -9,7 +9,7 @@ import { LayoutStore } from './server/layout-store'
 import { BranchStore } from './server/branch-store'
 import type { GraphDTO, HealthReport, LayoutDocDTO, TurnListDTO } from './shared/protocol'
 
-export const name = 'dsh-mapper'
+export const name = 'dsh-lineage'
 
 export const inject = ['webServer', 'sessionQuery', 'workspaceRegistry'] as const
 
@@ -78,7 +78,7 @@ async function readJson(req: ServerRequest): Promise<any> {
 class InputError extends Error {}
 class NotFoundError extends Error {}
 
-/** Mirror of the DSH /api browser-trust fence: /mapper/* routes sit outside
+/** Mirror of the DSH /api browser-trust fence: /lineage/* routes sit outside
  * it, so the Host header is checked here (localhost default, config opt-in). */
 function hostAllowed(headers: ServerRequest['headers'], trusted: Set<string>): boolean {
   const raw = typeof headers?.host === 'string' ? headers.host : ''
@@ -97,7 +97,7 @@ export function apply(ctx: Ctx, config?: { trustedHosts?: unknown; dataDir?: unk
     }
   }
 
-  const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>dsh-mapper</title></head><body><p>dsh-mapper is mounted. API: <a href="/mapper/api/graph">/mapper/api/graph</a></p></body></html>`
+  const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>dsh-lineage</title></head><body><p>dsh-lineage is mounted. API: <a href="/lineage/api/graph">/lineage/api/graph</a></p></body></html>`
 
   const fetchGraph = async (): Promise<GraphDTO> => {
     const records = await ctx.sessionQuery.listSessions()
@@ -136,18 +136,18 @@ export function apply(ctx: Ctx, config?: { trustedHosts?: unknown; dataDir?: unk
   const api = async (req: ServerRequest, res: ServerResponse): Promise<void> => {
     if (!hostAllowed(req.headers, trusted)) return void sendJson(res, 403, { error: '不被信任的 Host' })
     const path = new URL(req.url ?? '/', 'http://dsh.local').pathname
-    if (path === '/mapper/api/graph' && req.method === 'GET') {
+    if (path === '/lineage/api/graph' && req.method === 'GET') {
       return void sendJson(res, 200, await fetchGraph())
     }
-    const turns = /^\/mapper\/api\/sessions\/([A-Za-z0-9_-]+)\/turns$/.exec(path)
+    const turns = /^\/lineage\/api\/sessions\/([A-Za-z0-9_-]+)\/turns$/.exec(path)
     if (turns !== null && req.method === 'GET') {
       const full = new URL(req.url ?? '/', 'http://dsh.local').searchParams.get('full') === '1'
       return void sendJson(res, 200, await fetchTurns(turns[1], full))
     }
-    if (path === '/mapper/api/branches' && req.method === 'GET' && branches !== null) {
+    if (path === '/lineage/api/branches' && req.method === 'GET' && branches !== null) {
       return void sendJson(res, 200, { branches: await branches.all() })
     }
-    if (path === '/mapper/api/branches' && req.method === 'POST' && branches !== null) {
+    if (path === '/lineage/api/branches' && req.method === 'POST' && branches !== null) {
       const body = await readJson(req)
       const stub = await branches.create({
         sourceSessionId: String(body?.sourceSessionId ?? ''),
@@ -157,7 +157,7 @@ export function apply(ctx: Ctx, config?: { trustedHosts?: unknown; dataDir?: unk
       })
       return void sendJson(res, 201, { branch: stub })
     }
-    const branch = /^\/mapper\/api\/branches\/([A-Za-z0-9-]+)$/.exec(path)
+    const branch = /^\/lineage\/api\/branches\/([A-Za-z0-9-]+)$/.exec(path)
     if (branch !== null && branches !== null) {
       if (req.method === 'PUT') {
         const body = await readJson(req)
@@ -167,7 +167,7 @@ export function apply(ctx: Ctx, config?: { trustedHosts?: unknown; dataDir?: unk
         return void sendJson(res, 200, { deleted: await branches.remove(branch[1]) })
       }
     }
-    const layout = /^\/mapper\/api\/layout\/(.+)$/.exec(path)
+    const layout = /^\/lineage\/api\/layout\/(.+)$/.exec(path)
     if (layout !== null && layouts !== null) {
       const workspaceId = decodeURIComponent(layout[1])
       if (req.method === 'GET') {
@@ -183,10 +183,10 @@ export function apply(ctx: Ctx, config?: { trustedHosts?: unknown; dataDir?: unk
     return void sendJson(res, 404, { error: '接口不存在' })
   }
 
-  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/mapper', handler: (_req, res) => { res.writeHead(302, { location: '/mapper/' }); res.end() } }), 'dsh-mapper: redirect')
-  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/mapper/', handler: (_req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); res.end(page) } }), 'dsh-mapper: page')
-  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/mapper/api/health', handler: (_req, res) => sendJson(res, 200, { ok: true, plugin: name, version: VERSION } satisfies HealthReport) }), 'dsh-mapper: health')
-  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/mapper/api', handler: api }), 'dsh-mapper: api')
+  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/lineage', handler: (_req, res) => { res.writeHead(302, { location: '/lineage/' }); res.end() } }), 'dsh-lineage: redirect')
+  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/lineage/', handler: (_req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); res.end(page) } }), 'dsh-lineage: page')
+  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/lineage/api/health', handler: (_req, res) => sendJson(res, 200, { ok: true, plugin: name, version: VERSION } satisfies HealthReport) }), 'dsh-lineage: health')
+  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/lineage/api', handler: api }), 'dsh-lineage: api')
 }
 
 export { buildTurns, buildGraph }

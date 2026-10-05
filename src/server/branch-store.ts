@@ -27,7 +27,7 @@ export class BranchStore {
   private readonly cache = new Map<string, BranchDoc>()
 
   constructor(dataDir: string) {
-    if (typeof dataDir !== 'string' || dataDir.length === 0) throw new Error('dsh-mapper: config.dataDir must be a non-empty path')
+    if (typeof dataDir !== 'string' || dataDir.length === 0) throw new Error('dsh-lineage: config.dataDir must be a non-empty path')
     this.root = join(dataDir, 'branches')
   }
 

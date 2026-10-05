@@ -1,4 +1,4 @@
-// dsh-mapper client face.
+// dsh-lineage client face.
 // Two slot entries (contract: docs/contract-notes.md §a):
 // - `conversation.session.header.actions` (list / session): the open button;
 // - `shell.overlay` (list / root): the full-screen map panel.
@@ -75,7 +75,7 @@ function MapOverlayEntry({ useOpen, onClose, useSessions, actions, origin }: Ove
   const [branches, setBranches] = useState<PendingBranchDTO[]>([])
   const load = useCallback(() => {
     setLoading(true)
-    void fetch('/mapper/api/graph')
+    void fetch('/lineage/api/graph')
       .then(response => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         return response.json() as Promise<GraphDTO>
@@ -89,7 +89,7 @@ function MapOverlayEntry({ useOpen, onClose, useSessions, actions, origin }: Ove
   }, [])
 
   const refreshBranches = useCallback(() => {
-    void fetch('/mapper/api/branches')
+    void fetch('/lineage/api/branches')
       .then(response => (response.ok ? response.json() : { branches: [] }))
       .then((body: { branches: PendingBranchDTO[] }) => setBranches(body.branches ?? []))
       .catch(() => {})
@@ -104,7 +104,7 @@ function MapOverlayEntry({ useOpen, onClose, useSessions, actions, origin }: Ove
     for (const group of graph.workspaces) {
       if (loadedLayouts.current.has(group.workspaceId)) continue
       loadedLayouts.current.add(group.workspaceId)
-      void fetch(`/mapper/api/layout/${encodeURIComponent(group.workspaceId)}`)
+      void fetch(`/lineage/api/layout/${encodeURIComponent(group.workspaceId)}`)
         .then(response => (response.ok ? response.json() : { layout: null }))
         .then((body: { layout: LayoutDocDTO | null }) => {
           if (body.layout !== null) {
@@ -119,7 +119,7 @@ function MapOverlayEntry({ useOpen, onClose, useSessions, actions, origin }: Ove
     setLayouts(current => {
       const lanes = { ...(current[workspaceId]?.lanes ?? {}), [sessionId]: { dx, dy } }
       const doc: LayoutDocDTO = { workspaceId, lanes }
-      void fetch(`/mapper/api/layout/${encodeURIComponent(workspaceId)}`, {
+      void fetch(`/lineage/api/layout/${encodeURIComponent(workspaceId)}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ lanes }),
@@ -190,7 +190,7 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
         jump: (sessionId, messageId, displayTitle, isCurrentSession, opts) => openTurnInConversation(sessionId, messageId, displayTitle, isCurrentSession, opts),
         followUp: (sessionId, text) => sendFollowUp(ctx.sessions as ClientSessionsFace, sessionId, text),
         renameSession: (sessionId, title) => renameSession(ctx.sessions as ClientSessionsFace, sessionId, title),
-        createBranch: input => fetch('/mapper/api/branches', {
+        createBranch: input => fetch('/lineage/api/branches', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(input),
@@ -198,14 +198,14 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
           if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? `HTTP ${response.status}`)
           return (await response.json()).branch as PendingBranchDTO
         }),
-        renameBranch: (id, title) => fetch(`/mapper/api/branches/${id}`, {
+        renameBranch: (id, title) => fetch(`/lineage/api/branches/${id}`, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ title }),
         }).then(async response => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`)
         }),
-        deleteBranch: id => fetch(`/mapper/api/branches/${id}`, { method: 'DELETE' }).then(async response => {
+        deleteBranch: id => fetch(`/lineage/api/branches/${id}`, { method: 'DELETE' }).then(async response => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`)
         }),
         activateBranch: async (stub, text) => {
@@ -215,7 +215,7 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
           // Carry the stub's chosen name onto the real session; failure is
           // non-fatal (the session keeps the inherited incremented title).
           await renameSession(sessions, childId, stub.title).catch(() => {})
-          await fetch(`/mapper/api/branches/${stub.id}`, { method: 'DELETE' }).catch(() => {})
+          await fetch(`/lineage/api/branches/${stub.id}`, { method: 'DELETE' }).catch(() => {})
           return { sessionId: childId }
         },
       }
@@ -238,7 +238,7 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
       try {
         ctx.slots.register(meta, component)
       } catch (error) {
-        console.error('[dsh-mapper] slot registration failed:', meta.name, error)
+        console.error('[dsh-lineage] slot registration failed:', meta.name, error)
         ;(window as any).__dshmRegisterError = { slot: meta.name, error: String(error) }
       }
     })
@@ -246,7 +246,7 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
 
   contribute('conversation.session.header.actions', {
     name: 'conversation.session.header.actions',
-    id: 'dsh-mapper-open',
+    id: 'dsh-lineage-open',
     order: 900,
     inject: () => ({
       open: (sessionId: unknown) => {
@@ -257,7 +257,7 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
   }, HeaderButton)
   contribute('shell.overlay', {
     name: 'shell.overlay',
-    id: 'dsh-mapper-map',
+    id: 'dsh-lineage-map',
     order: 60,
     inject: () => ({ onClose: () => openSource.set(false), useOpen: subscribeHook(openSource), actions, origin: () => originRef.current }),
   }, MapOverlayEntry as any)
@@ -265,5 +265,5 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
   ctx.effect(() => () => {
     style.remove()
     if (isMac) document.documentElement.classList.remove('dshm-mac')
-  }, 'dsh-mapper: styles')
+  }, 'dsh-lineage: styles')
 }
