@@ -19,6 +19,31 @@ export interface ClientSessionsFace {
 
 export type OpenTurnResult = 'ok' | 'session-switched' | 'session-not-in-sidebar' | 'turn-not-found' | 'no-dom'
 
+// Row accessible names compose the title with row-action chrome and a
+// relative time glued on WITHOUT whitespace ("介绍 otty 工具1h" en,
+// "测试12分钟" zh, active rows "Completed<title>now"). Strip the chrome,
+// then match exactly so the original never resolves to its fork's row
+// (or vice versa). The UI language follows the account: both locales must
+// strip (en: 16h/now, zh: 16小时/6分钟/刚刚, group rows 默认工作区/未分组).
+export function stripRowChrome(label: string): string {
+  return label
+    .replace(/\s*Session actions for[\s\S]*$/, '')
+    .replace(/\d+(?:min|s|h|d|w)\s*$/i, '')
+    .replace(/\d+(?:秒钟?|分钟|小时|天|周|个月|月|年)\s*$/, '')
+    .trim()
+}
+
+// The ACTIVE or just-finished row glues a status word onto the title and a
+// "now"-style timestamp ("Completed<title>now") that the safe pass cannot
+// strip. Only used as a second pass so titles that legitimately start with
+// one of those words still match the safe way first.
+export function stripRowChromeAggressive(label: string): string {
+  return stripRowChrome(label)
+    .replace(/^(?:completed|running|errored|error|cancelled|canceled|queued|waiting|pinned|archived|已完成|运行中|出错|已取消|排队中|已置顶|已归档)\s*/i, '')
+    .replace(/\s*(?:just now|now|(?:\d+|a few)?\s*(?:seconds?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?)|today|yesterday|(?:\d+\s*)?(?:秒钟?|分钟|小时|天|周|个月|月|年)前?|刚刚)\s*$/i, '')
+    .trim()
+}
+
 /** Switch the visible conversation to `sessionId` and scroll to the turn whose
  * opening user message is `messageId`. rc.2 deliberately keeps view selection
  * out of the Controller, so the bridge clicks the sidebar row (matched by
@@ -55,23 +80,8 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
     return 'ok'
   }
 
-  // Row accessible names compose the title with row-action chrome ("… Session
-  // actions for … Archive session Pin session") and a relative time glued on
-  // without whitespace ("介绍 otty 工具1h"); forks carry " (1)" inside the
-  // title. Strip the chrome, then match exactly so the original never
-  // resolves to its fork's row (or vice versa).
-  const stripRowChrome = (label: string) => label
-    .replace(/\s*Session actions for[\s\S]*$/, '')
-    .replace(/\d+(?:min|s|h|d|w)\s*$/i, '')
-    .trim()
-  // The ACTIVE or just-finished row glues a status word onto the title and a
-  // "now" timestamp ("Completed<title>now") that the safe pass cannot strip.
-  // Only used as a second pass so titles that legitimately start with one of
-  // those words still match the safe way first.
-  const stripRowChromeAggressive = (label: string) => stripRowChrome(label)
-    .replace(/^(?:completed|running|errored|error|cancelled|canceled|queued|waiting|pinned|archived)\s*/i, '')
-    .replace(/\s*(?:just now|now|(?:\d+|a few)?\s*(?:seconds?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?)|today|yesterday)\s*$/i, '')
-    .trim()
+  // Row chrome stripping lives at module level (stripRowChrome /
+  // stripRowChromeAggressive) — bilingual en/zh, unit-tested.
   const findRow = (): HTMLDivElement | undefined => {
     const items = Array.from(document.querySelectorAll<HTMLDivElement>('[role="treeitem"]'))
     if (wanted === '') return undefined

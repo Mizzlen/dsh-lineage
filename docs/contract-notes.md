@@ -116,6 +116,7 @@ window.__ModuleLoader__.load({
 8. **侧栏行 chrome 的完整形态与折叠组（2026-10-05，v0.0.6 跳转修复）**：
    - 活动/刚结束会话的行文本 = `Completed` + 标题 + `now` **三段无分隔粘合**（"Completed标题now"）——安全剥离（Session actions 尾巴 + 数字时间）剥不掉，父子互跳因此整等失败；跳转桥改为两段式：安全剥离整等失败后再用激进剥离（状态词前缀 `completed|running|errored|…` + 尾部 `now`）整等。
    - fork 子会话可能落在侧栏 **"Ungrouped" 组**（cwd 桶归属），该组默认折叠——折叠组的行不在 DOM 上，只扫 `[role="treeitem"]` 永远找不到。桥在匹配失败时先点击所有 `[role="treeitem"][aria-expanded="false"]` 展开组再重扫。两者合起来修复"从父进入点子 / 从子进入点父都报找不到会话"。
+   - **行文案随账号语言双语**（2026-10-05 用户日志确认，zh UI）：zh 行尾粘 `6分钟`/`18小时`（无空格），组行叫 `默认工作区`/`未分组`——en 规则（`16h`/`now`）完全失效。剥离函数提升为导出纯函数 `stripRowChrome`/`stripRowChromeAggressive`（glue.ts），双语时间与状态词均有单测（test/glue.test.ts，用用户日志原文做用例）。诊断钩子：失败时挂 `window.__dshmJumpDebug`（wanted/行数/折叠组数/全部行文本）并 console.warn，toast 指向它。
 
 ## Desktop（Electron）安装实测（2026-10-04）
 
