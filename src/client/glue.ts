@@ -69,8 +69,8 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
   // Only used as a second pass so titles that legitimately start with one of
   // those words still match the safe way first.
   const stripRowChromeAggressive = (label: string) => stripRowChrome(label)
-    .replace(/^(?:completed|running|errored|error|cancelled|canceled|queued|waiting)\s*/i, '')
-    .replace(/\s*now$/i, '')
+    .replace(/^(?:completed|running|errored|error|cancelled|canceled|queued|waiting|pinned|archived)\s*/i, '')
+    .replace(/\s*(?:just now|now|(?:\d+|a few)?\s*(?:seconds?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?)|today|yesterday)\s*$/i, '')
     .trim()
   const findRow = (): HTMLDivElement | undefined => {
     const items = Array.from(document.querySelectorAll<HTMLDivElement>('[role="treeitem"]'))
@@ -129,7 +129,19 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
     row = findRow()
   }
   if (row === undefined) row = await scrollScan()
-  if (row === undefined) return 'session-not-in-sidebar'
+  if (row === undefined) {
+    // Fail loudly with evidence: the row bridge is version-sensitive, so a
+    // miss must be diagnosable from the page itself.
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="treeitem"]'))
+    ;(window as any).__dshmJumpDebug = {
+      wanted,
+      treeitemCount: items.length,
+      collapsedGroups: document.querySelectorAll('[role="treeitem"][aria-expanded="false"]').length,
+      rowLabels: items.map(item => (item.getAttribute('aria-label') ?? item.textContent ?? '').slice(0, 120)),
+    }
+    console.warn('[dsh-mapper] jump target row not found; see window.__dshmJumpDebug', (window as any).__dshmJumpDebug)
+    return 'session-not-in-sidebar'
+  }
 
   // React handlers may sit on an inner row element, not the treeitem itself:
   // dispatch on the deepest label node so the event walks the real handler path.

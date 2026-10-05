@@ -543,7 +543,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
         onClose()
         if (result === 'session-switched') showToast('已打开会话，但没定位到那一轮（已停在会话开头）', 'error')
       } else if (result === 'session-not-in-sidebar') {
-        showToast('侧栏里找不到这个会话（可能被折叠或归档）', 'error')
+        showToast('侧栏里找不到这个会话（详情见控制台 __dshmJumpDebug）', 'error')
       } else {
         showToast('跳转失败', 'error')
       }
