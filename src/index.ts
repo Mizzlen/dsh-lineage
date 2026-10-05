@@ -13,7 +13,7 @@ export const name = 'dsh-mapper'
 
 export const inject = ['webServer', 'sessionQuery', 'workspaceRegistry'] as const
 
-const VERSION = '0.0.6'
+const VERSION = '0.0.7'
 
 interface ServerResponse {
   writeHead(status: number, headers: Record<string, string>): unknown

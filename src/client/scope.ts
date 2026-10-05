@@ -1,42 +1,53 @@
-// Map scope algebra (v0.0.2 logic change): the map is workspace-isolated.
-// Opening from a session yields a session-centric view (the session's lineage
-// neighborhood inside its workspace); the only drill-up is the workspace map.
-// There is deliberately no level above the workspace.
-import type { GraphDTO, TurnDTO, TurnListDTO } from '../shared/protocol'
+// Map scope algebra. The plugin's core idea: one lineage tree rooted at a
+// root session is ONE map — no logical separation inside it. DSH manages
+// sessions flat per workspace, so the lineage map sits between the session
+// (centered) tier and the flat workspace tier:
+//   血缘图 (lineage, default) — the origin's whole root tree, every node,
+//     spanning workspace buckets freely; branch anywhere and it shows up in
+//     the same map; any ancestor ↔ any descendant pair is one click apart.
+//   工作区 (workspace) — the drill-up: the flat slice of one workspace bucket.
+import type { GraphDTO } from '../shared/protocol'
 import { turnKey } from '../shared/protocol'
 
-export type MapScope = 'session' | 'workspace'
+export type MapScope = 'lineage' | 'workspace'
 
 export function originWorkspaceId(graph: GraphDTO, originSessionId: string | null): string | null {
   if (originSessionId === null) return null
   return graph.nodes.find(node => node.sessionId === originSessionId)?.workspaceId ?? null
 }
 
-/** Session-centric view: the origin session, its ancestor chain and its
- * recursive fork descendants — every node confined to the origin's workspace. */
-export function lineageNeighborhood(graph: GraphDTO, originSessionId: string): GraphDTO {
-  const origin = graph.nodes.find(node => node.sessionId === originSessionId)
-  if (origin === undefined) return graph
-  const inWorkspace = graph.nodes.filter(node => node.workspaceId === origin.workspaceId)
-  const byId = new Map(inWorkspace.map(node => [node.sessionId, node]))
+/** The lineage tree that contains `originSessionId`, rooted at its topmost
+ * reachable ancestor and including EVERY recursive descendant — ancestors'
+ * other branches included. Deliberately ignores workspace attribution: a
+ * fork child that landed in a cwd bucket is still the same tree. */
+export function rootTree(graph: GraphDTO, originSessionId: string): GraphDTO {
+  const byId = new Map(graph.nodes.map(node => [node.sessionId, node]))
+  let root = byId.get(originSessionId)
+  if (root === undefined) {
+    let workspaceId = originWorkspaceId(graph, originSessionId)
+    if (workspaceId === null) {
+      const first = graph.workspaces.find(workspace => graph.nodes.some(node => node.workspaceId === workspace.workspaceId))
+      workspaceId = first?.workspaceId ?? null
+    }
+    return workspaceSlice(graph, workspaceId)
+  }
+  const walked = new Set<string>([root.sessionId])
+  while (root.parentSessionId !== null && byId.has(root.parentSessionId) && !walked.has(root.parentSessionId)) {
+    walked.add(root.parentSessionId)
+    root = byId.get(root.parentSessionId) as typeof root
+  }
+
   const childrenOf = new Map<string, string[]>()
-  for (const node of inWorkspace) {
-    if (node.parentSessionId !== null) {
+  for (const node of graph.nodes) {
+    if (node.parentSessionId !== null && byId.has(node.parentSessionId)) {
       const list = childrenOf.get(node.parentSessionId) ?? []
       list.push(node.sessionId)
       childrenOf.set(node.parentSessionId, list)
     }
   }
 
-  const keep = new Set<string>([origin.sessionId])
-  let cursor: (typeof inWorkspace)[number] | undefined = origin
-  while (cursor !== undefined && cursor.parentSessionId !== null) {
-    const parent = byId.get(cursor.parentSessionId)
-    if (parent === undefined) break
-    keep.add(parent.sessionId)
-    cursor = parent
-  }
-  const stack = [origin.sessionId]
+  const keep = new Set<string>([root.sessionId])
+  const stack = [root.sessionId]
   while (stack.length > 0) {
     const id = stack.pop() as string
     for (const child of childrenOf.get(id) ?? []) {
@@ -47,23 +58,23 @@ export function lineageNeighborhood(graph: GraphDTO, originSessionId: string): G
     }
   }
 
-  const nodes = inWorkspace.filter(node => keep.has(node.sessionId))
-  const ids = new Set(nodes.map(node => node.sessionId))
-  return { ...graph, nodes, edges: graph.edges.filter(edge => ids.has(edge.from) && ids.has(edge.to)) }
+  const nodes = graph.nodes.filter(node => keep.has(node.sessionId))
+  return { ...graph, nodes, edges: graph.edges.filter(edge => keep.has(edge.from) && keep.has(edge.to)) }
 }
 
-/** Workspace view: every session of exactly one workspace, nothing else. */
+/** Workspace view: every session of exactly one workspace bucket, nothing
+ * else — the flat tier that mirrors how DSH itself lists sessions. */
 export function workspaceSlice(graph: GraphDTO, workspaceId: string | null): GraphDTO {
   const nodes = graph.nodes.filter(node => node.workspaceId === workspaceId)
   const ids = new Set(nodes.map(node => node.sessionId))
   return { ...graph, nodes, edges: graph.edges.filter(edge => ids.has(edge.from) && ids.has(edge.to)) }
 }
 
-/** The view for the current scope. Without an origin there is no session
- * center to speak of — fall back to the workspace slice of the first
- * workspace that has nodes. */
+/** The view for the current scope. Without an origin there is no tree to
+ * center on — fall back to the workspace slice of the first workspace that
+ * has nodes. */
 export function scopedGraph(graph: GraphDTO, scope: MapScope, originSessionId: string | null): GraphDTO {
-  if (originSessionId !== null && scope === 'session') return lineageNeighborhood(graph, originSessionId)
+  if (originSessionId !== null && scope === 'lineage') return rootTree(graph, originSessionId)
   let workspaceId = originWorkspaceId(graph, originSessionId)
   if (workspaceId === null) {
     const first = graph.workspaces.find(workspace => graph.nodes.some(node => node.workspaceId === workspace.workspaceId))
@@ -78,12 +89,12 @@ export function scopedGraph(graph: GraphDTO, scope: MapScope, originSessionId: s
  * cut comes from a lazy-branch stub's recorded atSeq or the forked child's
  * turns response seedSeq — both are the last inherited event seq. */
 export function forkAnchorY(
-  list: TurnListDTO | undefined,
+  list: { sessionId: string; turns: Array<{ startSeq: number }> } | undefined,
   cut: number | null | undefined,
   cardPos: Record<string, { top: number; height: number }>,
 ): number | null {
   if (cut === null || cut === undefined || list === undefined) return null
-  let best: TurnDTO | undefined
+  let best: { startSeq: number } | undefined
   for (const turn of list.turns) {
     if (turn.startSeq <= cut && (best === undefined || turn.startSeq > best.startSeq)) best = turn
   }

@@ -49,7 +49,7 @@ function refetchTurnInto(sessionId: string, apply: (list: TurnListDTO) => void, 
 }
 
 export interface MapActions {
-  jump(sessionId: string, messageId: string | null, displayTitle: string, isCurrentSession: boolean): Promise<'ok' | 'session-switched' | 'session-not-in-sidebar' | 'turn-not-found' | 'no-dom'>
+  jump(sessionId: string, messageId: string | null, displayTitle: string, isCurrentSession: boolean, opts?: { isCancelled?: () => boolean }): Promise<'ok' | 'session-switched' | 'session-not-in-sidebar' | 'turn-not-found' | 'no-dom'>
   followUp(sessionId: string, text: string): Promise<void>
   renameSession(sessionId: string, title: string): Promise<void>
   createBranch(input: { sourceSessionId: string; atSeq: number | null; title: string; workspaceId: string }): Promise<PendingBranchDTO>
@@ -188,7 +188,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
   const [camera, setCamera] = useState({ x: 40, y: 24, scale: 0.9 })
   const [panning, setPanning] = useState(false)
   const [showSubagents, setShowSubagents] = useState(false)
-  const [scope, setScope] = useState<MapScope>('session')
+  const [scope, setScope] = useState<MapScope>('lineage')
   const [reader, setReader] = useState<{
     sessionId: string
     turn: TurnDTO
@@ -245,6 +245,15 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
   // that ends on the title suppresses the synthetic click entirely.
   const clickTimer = useRef(0)
   const dragMovedRef = useRef(false)
+  // Jump generation + map-alive flag: pending bridge walks die with the map.
+  const jumpSeqRef = useRef(0)
+  const closedRef = useRef(false)
+  useEffect(() => () => {
+    closedRef.current = true
+    jumpSeqRef.current += 1
+    window.clearTimeout(clickTimer.current)
+    window.clearTimeout(toastTimer.current)
+  }, [])
 
   const showToast = useCallback((text: string, kind: 'ok' | 'error' = 'ok') => {
     setToast({ text, kind })
@@ -456,12 +465,12 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
     const key = `${scope}:${originSessionId}:${mergedGraph.nodes.length}:${turns.size}:${viewSize.w}`
     if (fittedKeyRef.current === key) return
     fittedKeyRef.current = key
-    if (scope === 'session') centerOnOrigin(layout)
+    if (scope === 'lineage') centerOnOrigin(layout)
     else fitToView(layout)
   }, [layout, mergedGraph, turns.size, viewSize.w, scope, originSessionId, fitToView, centerOnOrigin])
 
   const toggleScope = () => {
-    setScope(current => (current === 'session' ? 'workspace' : 'session'))
+    setScope(current => (current === 'lineage' ? 'workspace' : 'lineage'))
     userMovedRef.current = false
     fittedKeyRef.current = ''
   }
@@ -534,11 +543,18 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
 
   const doJump = async (sessionId: string, messageId: string | null) => {
     if (actions === null) return
+    // A jump is a fire-and-forget bridge walk that can outlive the click that
+    // started it (retries take seconds). Each jump owns a generation token:
+    // closing the map or starting another jump cancels everything older, so
+    // nothing lands in the user's face after the fact.
+    const generation = ++jumpSeqRef.current
+    const isCancelled = () => generation !== jumpSeqRef.current || closedRef.current
     // A turn-less fork (no owned events) still opens the session — without a
     // scroll target the map closes and the toast says so.
     const title = mergedGraph?.nodes.find(n => n.sessionId === sessionId)?.title ?? sessionId
     try {
-      const result = await actions.jump(sessionId, messageId, title, sessionId === originSessionId)
+      const result = await actions.jump(sessionId, messageId, title, sessionId === originSessionId, { isCancelled })
+      if (isCancelled()) return
       if (result === 'ok' || result === 'session-switched') {
         onClose()
         if (result === 'session-switched') showToast('已打开会话，但没定位到那一轮（已停在会话开头）', 'error')
@@ -548,6 +564,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
         showToast('跳转失败', 'error')
       }
     } catch (cause) {
+      if (isCancelled()) return
       showToast(`跳转失败：${String(cause)}`, 'error')
     }
   }
@@ -677,7 +694,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
         onDoubleClick={event => {
           // Double click inside an input is text selection, never a view reset.
           if ((event.target as Element).closest('textarea, input') !== null) return
-          userMovedRef.current = false; fittedKeyRef.current = ''; if (scope === 'session') centerOnOrigin(layout); else fitToView(layout)
+          userMovedRef.current = false; fittedKeyRef.current = ''; if (scope === 'lineage') centerOnOrigin(layout); else fitToView(layout)
         }}
       >
         <div className="dshm-topbar">
@@ -685,13 +702,13 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
           <button type="button" className="dshm-btn" onClick={onReload}>刷新</button>
           {originSessionId !== null ? (
             <button type="button" className="dshm-btn" onClick={toggleScope}>
-              {scope === 'session' ? '展开为工作区地图' : '回到会话中心'}
+              {scope === 'lineage' ? '展开为工作区地图' : '回到血缘图'}
             </button>
           ) : null}
           <button type="button" className="dshm-btn" onClick={() => setShowSubagents(value => !value)}>
             {showSubagents ? '隐藏 subagent' : '显示 subagent'}
           </button>
-          <span className="dshm-hint">{scope === 'session' ? '会话视角（血缘邻域）· ' : '工作区视角 · '}滚轮缩放 · Shift/Alt+滚轮平移 · 拖拽标题移动泳道 · 标题单击打开/双击改名 · 双击卡片展开阅读 · 双击空白复位</span>
+          <span className="dshm-hint">{scope === 'lineage' ? '血缘图（根会话整棵树 · 跨分组完整）· ' : '工作区视角（扁平）· '}滚轮缩放 · Shift/Alt+滚轮平移 · 拖拽标题移动泳道 · 标题单击打开/双击改名 · 双击卡片展开阅读 · 双击空白复位</span>
           {loading ? <span className="dshm-hint">加载中…</span> : null}
           {error !== null ? <span className="dshm-hint" style={{ color: '#b42323' }}>{error}</span> : null}
         </div>

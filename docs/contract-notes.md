@@ -118,6 +118,7 @@ window.__ModuleLoader__.load({
    - fork 子会话可能落在侧栏 **"Ungrouped" 组**（cwd 桶归属），该组默认折叠——折叠组的行不在 DOM 上，只扫 `[role="treeitem"]` 永远找不到。桥在匹配失败时先点击所有 `[role="treeitem"][aria-expanded="false"]` 展开组再重扫。两者合起来修复"从父进入点子 / 从子进入点父都报找不到会话"。
    - **行文案随账号语言双语**（2026-10-05 用户日志确认，zh UI）：zh 行尾粘 `6分钟`/`18小时`（无空格），组行叫 `默认工作区`/`未分组`——en 规则（`16h`/`now`）完全失效。剥离函数提升为导出纯函数 `stripRowChrome`/`stripRowChromeAggressive`（glue.ts），双语时间与状态词均有单测（test/glue.test.ts，用用户日志原文做用例）。诊断钩子：失败时挂 `window.__dshmJumpDebug`（wanted/行数/折叠组数/全部行文本）并 console.warn，toast 指向它。
 9. **fork 切点语义 = 轮次结束（2026-10-05 修正）**：「从此分支」最初用 `turn.startSeq` 做切点——包含式切割只继承到"问题"事件，**该轮的回答整体缺席**，短会话里表现为"子会话毫无父节点记忆"（日志实证：三个激活产物的 end-seed 都在 seq9，父会话回答在 seq10+）。修正：`TurnDTO.endSeq` 取该轮 `turn/end` 事件 seq，「从此分支」改发 `endSeq ?? startSeq`（未结束的轮次回退问题处）。实测：新 fork 的 end-seed=seq20，继承前缀含父轮完整回答，追问卡的上下文探针能复述上一轮内容。验证方法：日志里的 `session/end-seed` seq = 切点+1，直接可比。
+10. **scope 模型 v0.0.7（用户理念落地）**：血缘树 = 一张图，内部不做工作区隔断。`rootTree(graph, origin)` 从 origin 沿 `parentSessionId` 走到最高可达祖先，收整棵树的全部递归后代（含祖先的其他分支）——**刻意不看 workspaceId**：fork 落进 cwd 桶的子会话依然是同一棵树。默认视角即血缘图（origin 居中）；工作区视图降级为显式的"上钻"扁平切片。跳转桥带 `isCancelled` 令牌（世代计数 + 地图卸载标志），地图关闭/新跳转会取消在飞的桥走行（重试循环、scrollScan、行点击、锚点滚动），杜绝"滞留队列、事后误触"。
 
 ## Desktop（Electron）安装实测（2026-10-04）
 

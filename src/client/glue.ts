@@ -53,8 +53,15 @@ export function stripRowChromeAggressive(label: string): string {
  *
  * `isCurrentSession` skips the sidebar entirely: the conversation is already
  * open beneath the map, so after the map closes only the scroll is needed. */
-export async function openTurnInConversation(sessionId: string, messageId: string | null, displayTitle: string, isCurrentSession = false): Promise<OpenTurnResult> {
-  if (typeof document === 'undefined') return 'no-dom'
+export async function openTurnInConversation(
+  sessionId: string,
+  messageId: string | null,
+  displayTitle: string,
+  isCurrentSession = false,
+  opts: { isCancelled?: () => boolean } = {},
+): Promise<OpenTurnResult> {
+  const cancelled = (): boolean => opts.isCancelled?.() === true
+  if (typeof document === 'undefined' || cancelled()) return 'no-dom'
   const wanted = displayTitle.trim()
   const anchorSelector = messageId !== null && messageId !== ''
     ? `[data-chat-anchor-key$="input-message${messageId}"]`
@@ -63,7 +70,9 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
     if (anchorSelector === null) return 'turn-not-found'
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
+      if (cancelled()) return 'no-dom'
       await new Promise(resolve => setTimeout(resolve, 300))
+      if (cancelled()) return 'no-dom'
       const anchor = document.querySelector<HTMLElement>(anchorSelector)
       if (anchor !== null) {
         anchor.scrollIntoView({ block: 'start' })
@@ -112,6 +121,7 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
   // Virtualized lists only render visible rows: walk the sessions tree's
   // scrollable ancestor, rescanning after each step.
   const scrollScan = async (): Promise<HTMLDivElement | undefined> => {
+    if (cancelled()) return undefined
     const tree = document.querySelector('[role="tree"]')
     let scroller: HTMLElement | null = null
     for (let el = tree?.parentElement; el !== null && el !== undefined; el = el.parentElement) {
@@ -119,6 +129,7 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
     }
     if (scroller === null) return undefined
     for (let step = 0; step < 30; step += 1) {
+      if (cancelled()) return undefined
       const row = findRow()
       if (row !== undefined) return row
       const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4
@@ -131,6 +142,7 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
 
   let row = findRow()
   for (let attempt = 0; row === undefined && attempt < 6; attempt += 1) {
+    if (cancelled()) return 'no-dom'
     // Truncated lists and collapsed groups both hide rows; expand whichever
     // is present (alternating until neither fires) before rescanning.
     const expanded = expandTruncatedList() || expandCollapsedGroups()
@@ -138,7 +150,9 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
     await new Promise(resolve => setTimeout(resolve, 250))
     row = findRow()
   }
+  if (cancelled()) return 'no-dom'
   if (row === undefined) row = await scrollScan()
+  if (cancelled()) return 'no-dom'
   if (row === undefined) {
     // Fail loudly with evidence: the row bridge is version-sensitive, so a
     // miss must be diagnosable from the page itself.
@@ -158,9 +172,11 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
   const deepest = Array.from(row.querySelectorAll<HTMLElement>('*'))
     .filter(el => el.children.length === 0 && (el.textContent ?? '').trim().startsWith(wanted))
   const clickTarget = deepest.at(-1) ?? row
+  if (cancelled()) return 'no-dom'
   clickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 
   const scrolled = await scrollWhenPresent(6000)
+  if (cancelled()) return 'no-dom'
   // The session did switch; only the turn anchor may be missing.
   return scrolled === 'turn-not-found' ? 'session-switched' : scrolled
 }

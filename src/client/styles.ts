@@ -96,6 +96,10 @@ body[data-ds-dark-theme] .dshm-btn { background: #262b33; border-color: #343b46;
 body[data-ds-dark-theme] .dshm-toast { background: #1d3325; color: #bbf7d0; }
 body[data-ds-dark-theme] .dshm-toast.is-error { background: #3a2626; color: #e0a0a0; }
 .dshm-lane.is-sub { opacity: 0.75; }
+/* position:relative makes the title the containing block for its ✕ (a stub
+   lane's delete button) — otherwise it anchors to the lane and drifts over
+   the ask card. */
+.dshm-session-title { position: relative; }
 .dshm-session-title.is-grabbable { cursor: grab; }
 .dshm-session-title.is-grabbable:active { cursor: grabbing; }
 /* Delete-stub ✕ sits inside the pending lane's title bar (open/rename merged

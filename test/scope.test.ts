@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { forkAnchorY, lineageNeighborhood, originWorkspaceId, scopedGraph, workspaceSlice, type MapScope } from '../src/client/scope'
-import type { GraphDTO, NodeDTO } from '../src/shared/protocol'
+import { forkAnchorY, originWorkspaceId, rootTree, scopedGraph, workspaceSlice, type MapScope } from '../src/client/scope'
+import type { GraphDTO, NodeDTO, TurnListDTO } from '../src/shared/protocol'
 
 const node = (id: string, opts: { ws?: string; parent?: string; sub?: boolean } = {}): NodeDTO => ({
   sessionId: id,
@@ -31,33 +31,50 @@ describe('originWorkspaceId', () => {
   })
 })
 
-describe('lineageNeighborhood', () => {
-  it('keeps ancestors and descendants but not unrelated sessions, even in the same workspace', () => {
+describe('rootTree', () => {
+  it('takes the WHOLE tree from the root: ancestors, their other branches, all descendants', () => {
     const g = graph(
       [
         node('root'),
         node('mid', { parent: 'root' }),
         node('origin', { parent: 'mid' }),
+        node('sibling', { parent: 'mid' }),
         node('child', { parent: 'origin' }),
         node('grandchild', { parent: 'child' }),
-        node('unrelated', { parent: 'root' }),
+        node('unrelated'),
       ],
-      [['root', 'mid'], ['mid', 'origin'], ['origin', 'child'], ['child', 'grandchild'], ['root', 'unrelated']],
+      [['root', 'mid'], ['mid', 'origin'], ['mid', 'sibling'], ['origin', 'child'], ['child', 'grandchild']],
     )
-    const view = lineageNeighborhood(g, 'origin')
+    const view = rootTree(g, 'origin')
     const ids = view.nodes.map(n => n.sessionId).sort()
-    expect(ids).toEqual(['child', 'grandchild', 'mid', 'origin', 'root'])
-    expect(view.edges).toHaveLength(4)
+    expect(ids).toEqual(['child', 'grandchild', 'mid', 'origin', 'root', 'sibling'])
+    expect(view.edges).toHaveLength(5)
   })
 
-  it('never crosses the workspace boundary', () => {
+  it('is NOT workspace-isolated: a lineage crossing buckets stays one map', () => {
+    // A fork child whose workspace attach failed lives in a cwd bucket —
+    // it is still the same tree (the v0.0.6 confusion this fixes).
     const g = graph([
-      node('origin', { ws: 'w1' }),
-      node('otherWsRoot', { ws: 'w2' }),
-      node('otherWsChild', { ws: 'w2', parent: 'otherWsRoot' }),
+      node('root', { ws: 'w1' }),
+      node('child', { ws: 'cwd:/tmp/x', parent: 'root' }),
+      node('grandchild', { ws: 'w1', parent: 'child' }),
+      node('elsewhere', { ws: 'w2' }),
     ])
-    const view = lineageNeighborhood(g, 'origin')
+    const view = rootTree(g, 'grandchild')
+    expect(view.nodes.map(n => n.sessionId).sort()).toEqual(['child', 'grandchild', 'root'])
+  })
+
+  it('stops at a missing (e.g. archived) ancestor and roots there', () => {
+    const g = graph([node('origin', { parent: 'archived' }), node('other')])
+    const view = rootTree(g, 'origin')
     expect(view.nodes.map(n => n.sessionId)).toEqual(['origin'])
+  })
+
+  it('falls back to the origin workspace slice when the origin is absent', () => {
+    const g = graph([node('a'), node('b', { ws: 'w2' })])
+    const missing: TurnListDTO = { sessionId: 'missing', turns: [], seedSeq: 8 }
+    expect(rootTree(g, 'missing').nodes.map(n => n.sessionId)).toEqual(['a'])
+    expect(forkAnchorY(missing, 8, {})).toBeNull()
   })
 })
 
@@ -72,18 +89,18 @@ describe('workspaceSlice', () => {
 })
 
 describe('scopedGraph', () => {
-  const g = graph([node('a'), node('b', { parent: 'a' }), node('c')], [['a', 'b']])
-  it('defaults to the session view when an origin exists', () => {
-    const view = scopedGraph(g, 'session' as MapScope, 'a')
-    expect(view.nodes.map(n => n.sessionId).sort()).toEqual(['a', 'b'])
+  const g = graph([node('a'), node('b', { parent: 'a' }), node('s', { parent: 'a' }), node('c')], [['a', 'b'], ['a', 's']])
+  it('defaults to the lineage tree (whole root tree) when an origin exists', () => {
+    const view = scopedGraph(g, 'lineage' as MapScope, 'b')
+    expect(view.nodes.map(n => n.sessionId).sort()).toEqual(['a', 'b', 's'])
   })
   it('expands to the workspace and never above it', () => {
     const view = scopedGraph(g, 'workspace' as MapScope, 'a')
-    expect(view.nodes.map(n => n.sessionId).sort()).toEqual(['a', 'b', 'c'])
+    expect(view.nodes.map(n => n.sessionId).sort()).toEqual(['a', 'b', 'c', 's'])
   })
   it('falls back to the workspace slice without an origin', () => {
-    const view = scopedGraph(g, 'session' as MapScope, null)
-    expect(view.nodes.map(n => n.sessionId).sort()).toEqual(['a', 'b', 'c'])
+    const view = scopedGraph(g, 'lineage' as MapScope, null)
+    expect(view.nodes.map(n => n.sessionId).sort()).toEqual(['a', 'b', 'c', 's'])
   })
 })
 
@@ -107,6 +124,7 @@ describe('forkAnchorY', () => {
     expect(forkAnchorY(list, null, cardPos)).toBeNull()
     expect(forkAnchorY(undefined, 8, cardPos)).toBeNull()
     expect(forkAnchorY(list, 8, {})).toBeNull()
-    expect(forkAnchorY({ sessionId: 'p', turns: [], seedSeq: 8 }, 8, cardPos)).toBeNull()
+    const empty: TurnListDTO = { sessionId: 'p', turns: [], seedSeq: 8 }
+    expect(forkAnchorY(empty, 8, cardPos)).toBeNull()
   })
 })

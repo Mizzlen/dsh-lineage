@@ -187,7 +187,7 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
 
   const actions: MapActions | null = ctx.sessions
     ? {
-        jump: (sessionId, messageId, displayTitle, isCurrentSession) => openTurnInConversation(sessionId, messageId, displayTitle, isCurrentSession),
+        jump: (sessionId, messageId, displayTitle, isCurrentSession, opts) => openTurnInConversation(sessionId, messageId, displayTitle, isCurrentSession, opts),
         followUp: (sessionId, text) => sendFollowUp(ctx.sessions as ClientSessionsFace, sessionId, text),
         renameSession: (sessionId, title) => renameSession(ctx.sessions as ClientSessionsFace, sessionId, title),
         createBranch: input => fetch('/mapper/api/branches', {
