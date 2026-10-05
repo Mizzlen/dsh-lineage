@@ -105,4 +105,63 @@ body[data-ds-dark-theme] .dshm-chip.is-branch:hover { background: #26304a; color
 body[data-ds-dark-theme] .dshm-followup textarea { background: #20242c; color: #e2e8f0; border-color: #475569; }
 .dshm-followup-bar { display: flex; gap: 6px; margin-top: 4px; }
 .dshm-followup-bar .dshm-btn { height: 24px; padding: 0 10px; font-size: 11px; }
+.dshm-chip.is-expand { cursor: pointer; }
+.dshm-chip.is-expand:hover { background: #dbeafe; color: #1d4ed8; }
+body[data-ds-dark-theme] .dshm-chip.is-expand:hover { background: #1e3a5f; color: #93c5fd; }
+.dshm-lane.is-pending .dshm-card { border-style: dashed; opacity: 0.85; }
+.dshm-lane.is-pending .dshm-session-title { background: repeating-linear-gradient(45deg, #e2e8f0, #e2e8f0 6px, #edf1f6 6px, #edf1f6 12px); }
+body[data-ds-dark-theme] .dshm-lane.is-pending .dshm-session-title { background: repeating-linear-gradient(45deg, #262b33, #262b33 6px, #2d333d 6px, #2d333d 12px); }
+
+/* macOS traffic lights: keep the topbar clear of the window controls. */
+.dshm-mac .dshm-topbar { left: 88px; }
+
+/* Expanded-reading drawer and shared markdown spec (v0.0.3). */
+.dshm-reader {
+  position: absolute; top: 0; right: 0; bottom: 0; width: min(680px, 60vw);
+  background: #ffffff; border-left: 1px solid #d7dee8; box-shadow: -8px 0 24px rgba(15, 23, 42, 0.12);
+  display: flex; flex-direction: column; z-index: 4;
+}
+body[data-ds-dark-theme] .dshm-reader { background: #20242c; border-left-color: #343b46; }
+.dshm-reader-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid #e2e8f0;
+}
+body[data-ds-dark-theme] .dshm-reader-bar { border-bottom-color: #343b46; }
+.dshm-reader-title { font: 600 13px Inter, system-ui, sans-serif; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body[data-ds-dark-theme] .dshm-reader-title { color: #f1f5f9; }
+.dshm-reader-body { padding: 16px 20px 32px; overflow-y: auto; }
+.dshm-reader-q { font: 600 14px/1.6 Inter, system-ui, sans-serif; color: #0f172a; margin-bottom: 14px; }
+body[data-ds-dark-theme] .dshm-reader-q { color: #f1f5f9; }
+.dshm-reader-a { font: 400 13px/1.75 Inter, system-ui, sans-serif; color: #1e293b; }
+body[data-ds-dark-theme] .dshm-reader-a { color: #cbd5e1; }
+
+.dshm-md .dshm-p { margin: 0 0 10px; white-space: pre-wrap; }
+.dshm-md .dshm-p:last-child { margin-bottom: 0; }
+.dshm-md .dshm-h { margin: 18px 0 8px; font-weight: 700; line-height: 1.4; color: inherit; }
+.dshm-md .dshm-h1 { font-size: 20px; } .dshm-md .dshm-h2 { font-size: 17px; }
+.dshm-md .dshm-h3 { font-size: 15px; } .dshm-md .dshm-h4, .dshm-md .dshm-h5, .dshm-md .dshm-h6 { font-size: 14px; }
+.dshm-md .dshm-list { margin: 0 0 10px; padding-left: 22px; }
+.dshm-md .dshm-list li { margin: 3px 0; }
+.dshm-md .dshm-list ul, .dshm-md .dshm-list ol { margin: 3px 0 0; }
+.dshm-md .dshm-quote { margin: 0 0 10px; padding: 6px 12px; border-left: 3px solid #cbd5e1; color: #64748b; }
+body[data-ds-dark-theme] .dshm-md .dshm-quote { border-left-color: #475569; color: #94a3b8; }
+.dshm-md .dshm-hr { border: 0; border-top: 1px solid #e2e8f0; margin: 14px 0; }
+body[data-ds-dark-theme] .dshm-md .dshm-hr { border-top-color: #343b46; }
+.dshm-md .dshm-pre {
+  background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 10px 12px;
+  overflow-x: auto; font: 400 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0 0 10px;
+  white-space: pre-wrap; word-break: break-word;
+}
+body[data-ds-dark-theme] .dshm-md .dshm-pre { background: #14161b; }
+.dshm-md .dshm-mcode {
+  background: #eef2f7; color: #b42323; border-radius: 4px; padding: 1px 5px;
+  font: 400 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+body[data-ds-dark-theme] .dshm-md .dshm-mcode { background: #2a303a; color: #f0a5a5; }
+.dshm-md .dshm-table { border-collapse: collapse; margin: 0 0 12px; width: 100%; font-size: 12px; }
+.dshm-md .dshm-table th, .dshm-md .dshm-table td { border: 1px solid #d7dee8; padding: 5px 8px; text-align: left; vertical-align: top; }
+.dshm-md .dshm-table th { background: #f1f5f9; font-weight: 600; }
+body[data-ds-dark-theme] .dshm-md .dshm-table th, body[data-ds-dark-theme] .dshm-md .dshm-table td { border-color: #343b46; }
+body[data-ds-dark-theme] .dshm-md .dshm-table th { background: #262b33; }
+.dshm-md a { color: #2563eb; }
 `

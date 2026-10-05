@@ -4,8 +4,9 @@
 // disk and no polling runs while the map is closed (D6/D8). Lane drag
 // offsets persist per workspace through the Host layout routes.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { GraphDTO, LayoutDocDTO, NodeDTO, TurnListDTO } from '../shared/protocol'
+import type { GraphDTO, LayoutDocDTO, NodeDTO, PendingBranchDTO, TurnDTO, TurnListDTO } from '../shared/protocol'
 import { scopedGraph, type MapScope } from './scope'
+import { renderMarkdown } from './markdown'
 
 const CARD_W = 300
 const TURN_H = 96
@@ -19,29 +20,43 @@ interface TurnCacheEntry {
   promise: Promise<TurnListDTO>
 }
 const turnCache = new Map<string, TurnCacheEntry>()
+const fullTurnCache = new Map<string, TurnCacheEntry>()
 
-function fetchTurns(sessionId: string): Promise<TurnListDTO> {
-  let entry = turnCache.get(sessionId)
+function fetchTurns(sessionId: string, full = false): Promise<TurnListDTO> {
+  const cache = full ? fullTurnCache : turnCache
+  let entry = cache.get(sessionId)
   if (entry === undefined) {
-    entry = { promise: fetch(`/mapper/api/sessions/${sessionId}/turns`).then(r => r.json() as Promise<TurnListDTO>) }
-    turnCache.set(sessionId, entry)
+    entry = {
+      promise: fetch(`/mapper/api/sessions/${sessionId}/turns${full ? '?full=1' : ''}`).then(r => r.json() as Promise<TurnListDTO>),
+    }
+    cache.set(sessionId, entry)
   }
   return entry.promise
 }
 
 export function invalidateTurns(sessionIds: Iterable<string>): void {
-  for (const id of sessionIds) turnCache.delete(id)
+  for (const id of sessionIds) {
+    turnCache.delete(id)
+    fullTurnCache.delete(id)
+  }
 }
 
-function refetchTurnInto(sessionId: string, apply: (list: TurnListDTO) => void): void {
-  turnCache.delete(sessionId)
-  void fetchTurns(sessionId).then(apply).catch(() => {})
+function refetchTurnInto(sessionId: string, apply: (list: TurnListDTO) => void, full = false): void {
+  const cache = full ? fullTurnCache : turnCache
+  cache.delete(sessionId)
+  void fetchTurns(sessionId, full).then(apply).catch(() => {})
 }
 
 export interface MapActions {
   jump(sessionId: string, messageId: string | null, displayTitle: string, isCurrentSession: boolean): Promise<'ok' | 'session-switched' | 'session-not-in-sidebar' | 'turn-not-found' | 'no-dom'>
   followUp(sessionId: string, text: string): Promise<void>
-  forkAt(sessionId: string, atSeq?: number): Promise<string>
+  renameSession(sessionId: string, title: string): Promise<void>
+  createBranch(input: { sourceSessionId: string; atSeq: number | null; title: string; workspaceId: string }): Promise<PendingBranchDTO>
+  renameBranch(id: string, title: string): Promise<void>
+  deleteBranch(id: string): Promise<void>
+  /** Materialize a lazy branch: fork the source, send the first follow-up,
+   * drop the stub. The real session appears through the normal refresh. */
+  activateBranch(stub: PendingBranchDTO, text: string): Promise<{ sessionId: string }>
 }
 
 interface LayoutPosition {
@@ -154,23 +169,64 @@ function edgePath(from: LayoutPosition, to: LayoutPosition): string {
 
 export interface MapPanelProps {
   graph: GraphDTO | null
+  branches: PendingBranchDTO[]
   error: string | null
   loading: boolean
   runningById: Record<string, boolean>
   actions: MapActions | null
   layouts: Record<string, LayoutDocDTO>
   onOffsetChange: (workspaceId: string, sessionId: string, dx: number, dy: number) => void
+  onBranchesChanged: () => void
   originSessionId: string | null
   onClose: () => void
   onReload: () => void
 }
 
-export function MapPanel({ graph, error, loading, runningById, actions, layouts, onOffsetChange, originSessionId, onClose, onReload }: MapPanelProps) {
+export function MapPanel({ graph, branches, error, loading, runningById, actions, layouts, onOffsetChange, onBranchesChanged, originSessionId, onClose, onReload }: MapPanelProps) {
   const [turns, setTurns] = useState<Map<string, TurnListDTO>>(new Map())
   const [camera, setCamera] = useState({ x: 40, y: 24, scale: 0.9 })
   const [panning, setPanning] = useState(false)
   const [showSubagents, setShowSubagents] = useState(false)
   const [scope, setScope] = useState<MapScope>('session')
+  const [reader, setReader] = useState<{ sessionId: string; turn: TurnDTO } | null>(null)
+  const [inputFor, setInputFor] = useState<{ kind: 'followup' | 'rename' | 'renameBranch' | 'activate'; sessionId: string } | null>(null)
+  const [readerLoading, setReaderLoading] = useState(false)
+
+  // Merge lazy-branch stubs into the graph as pending nodes: they inherit the
+  // source's workspace and lineage, so scoping naturally includes them.
+  const mergedGraph = useMemo(() => {
+    if (graph === null) return null
+    if (branches.length === 0) return graph
+    const byId = new Map(graph.nodes.map(n => [n.sessionId, n]))
+    const nodes = [...graph.nodes]
+    const edges = [...graph.edges]
+    for (const stub of branches) {
+      const source = byId.get(stub.sourceSessionId)
+      if (source === undefined) continue
+      if (nodes.some(n => n.sessionId === stub.id)) continue
+      nodes.push({
+        sessionId: stub.id,
+        parentSessionId: stub.sourceSessionId,
+        title: stub.title,
+        workspaceId: source.workspaceId,
+        cwd: source.cwd,
+        origin: null,
+        delegationDepth: source.delegationDepth,
+        isSeeded: true,
+        createdAt: Date.parse(stub.createdAt) || 0,
+        pending: true,
+      })
+      edges.push({ from: stub.sourceSessionId, to: stub.id, kind: 'fork' })
+    }
+    return { ...graph, nodes, edges }
+  }, [graph, branches])
+
+  // Scope: session-centric (lineage neighborhood, workspace-isolated) by
+  // default; the only drill-up is the workspace map. Never above that.
+  const scoped = useMemo(
+    () => (mergedGraph === null ? null : scopedGraph(mergedGraph, scope, originSessionId)),
+    [mergedGraph, scope, originSessionId],
+  )
   const [followUpFor, setFollowUpFor] = useState<string | null>(null)
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null)
   const [viewSize, setViewSize] = useState({ w: 1280, h: 720 })
@@ -186,14 +242,20 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     toastTimer.current = window.setTimeout(() => setToast(null), 3200)
   }, [])
 
-  // Load turns for every node, bounded to 4 concurrent reads.
+  // Load turns for every real node, bounded to 4 concurrent reads.
   useEffect(() => {
-    if (graph === null) return
+    if (mergedGraph === null) return
     let alive = true
     const merged = new Map(turns)
-    for (const node of graph.nodes) if (!merged.has(node.sessionId)) merged.set(node.sessionId, { sessionId: node.sessionId, turns: [] })
+    for (const node of mergedGraph.nodes) {
+      if (node.pending === true) continue
+      if (!merged.has(node.sessionId)) merged.set(node.sessionId, { sessionId: node.sessionId, turns: [] })
+    }
     setTurns(new Map(merged))
-    const next = graph.nodes.map(n => n.sessionId).filter(id => !turns.has(id) || (turns.get(id)?.turns.length ?? 0) === 0)
+    const next = mergedGraph.nodes
+      .filter(n => n.pending !== true)
+      .map(n => n.sessionId)
+      .filter(id => !turns.has(id) || (turns.get(id)?.turns.length ?? 0) === 0)
     let active = 0
     const pump = () => {
       if (!alive) return
@@ -290,13 +352,13 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
 
   const laneHeights = useMemo(() => {
     const heights = new Map<string, number>()
-    for (const node of graph?.nodes ?? []) {
+    for (const node of mergedGraph?.nodes ?? []) {
       const list = turns.get(node.sessionId)
       const count = list === undefined ? 1 : Math.max(1, list.turns.length)
       heights.set(node.sessionId, measured[node.sessionId] ?? LANE_HEADER_H + count * (TURN_H + 18))
     }
     return heights
-  }, [graph, turns, measured])
+  }, [mergedGraph, turns, measured])
 
   // Pass two of the layout: after every commit, measure the real lane heights
   // (cards render at natural size) and feed them back. Positions never affect
@@ -328,12 +390,6 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     return merged
   }, [layouts, drag])
 
-  // Scope: session-centric (lineage neighborhood, workspace-isolated) by
-  // default; the only drill-up is the workspace map. Never above that.
-  const scoped = useMemo(
-    () => (graph === null ? null : scopedGraph(graph, scope, originSessionId)),
-    [graph, scope, originSessionId],
-  )
   const visibleGraph = useMemo(() => {
     if (scoped === null) return null
     if (showSubagents) return scoped
@@ -367,14 +423,14 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
   const fittedKeyRef = useRef<string>('')
   const userMovedRef = useRef(false)
   useEffect(() => {
-    if (layout === null || graph === null) return
+    if (layout === null || mergedGraph === null) return
     if (userMovedRef.current) return
-    const key = `${scope}:${originSessionId}:${graph.nodes.length}:${turns.size}:${viewSize.w}`
+    const key = `${scope}:${originSessionId}:${mergedGraph.nodes.length}:${turns.size}:${viewSize.w}`
     if (fittedKeyRef.current === key) return
     fittedKeyRef.current = key
     if (scope === 'session') centerOnOrigin(layout)
     else fitToView(layout)
-  }, [layout, graph, turns.size, viewSize.w, scope, originSessionId, fitToView, centerOnOrigin])
+  }, [layout, mergedGraph, turns.size, viewSize.w, scope, originSessionId, fitToView, centerOnOrigin])
 
   const toggleScope = () => {
     setScope(current => (current === 'session' ? 'workspace' : 'session'))
@@ -445,7 +501,7 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     if (actions === null) return
     // A turn-less fork (no owned events) still opens the session — without a
     // scroll target the map closes and the toast says so.
-    const title = graph?.nodes.find(n => n.sessionId === sessionId)?.title ?? sessionId
+    const title = mergedGraph?.nodes.find(n => n.sessionId === sessionId)?.title ?? sessionId
     try {
       const result = await actions.jump(sessionId, messageId, title, sessionId === originSessionId)
       if (result === 'ok' || result === 'session-switched') {
@@ -465,7 +521,7 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     if (actions === null) return
     try {
       await actions.followUp(sessionId, text)
-      setFollowUpFor(null)
+      setInputFor(null)
       showToast('追问已发送')
       // The answer lands seconds later: pull the session's turns again when
       // it should have completed (the running-flip path covers slow turns).
@@ -477,14 +533,92 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     }
   }
 
-  const doFork = async (sessionId: string, atSeq: number | undefined) => {
-    if (actions === null) return
+  // Lazy fork: record a branch stub; the session appears on first follow-up.
+  const doCreateBranch = async (node: NodeDTO, atSeq: number | null) => {
+    if (actions === null || node.workspaceId === null) {
+      showToast('这条泳道无法创建分支', 'error')
+      return
+    }
     try {
-      const childId = await actions.forkAt(sessionId, atSeq)
-      showToast(`分支已创建：${childId.slice(0, 8)}…（稍后出现在地图上）`)
+      await actions.createBranch({
+        sourceSessionId: node.sessionId,
+        atSeq,
+        title: `${node.title} 分支`,
+        workspaceId: node.workspaceId,
+      })
+      showToast('分支已记录（创建会话推迟到第一次追问）')
+      onBranchesChanged()
     } catch (cause) {
       showToast(`分支失败：${cause instanceof Error ? cause.message : String(cause)}`, 'error')
     }
+  }
+
+  const doDeleteBranch = async (id: string) => {
+    if (actions === null) return
+    try {
+      await actions.deleteBranch(id)
+      showToast('分支存根已移除')
+      onBranchesChanged()
+    } catch (cause) {
+      showToast(`移除失败：${String(cause)}`, 'error')
+    }
+  }
+
+  const doRenameSession = async (sessionId: string, title: string) => {
+    if (actions === null) return
+    try {
+      await actions.renameSession(sessionId, title)
+      setInputFor(null)
+      showToast('已改名（原生侧稍后同步显示）')
+      window.setTimeout(onReload, 600)
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      showToast(
+        /active write handle/.test(message)
+          ? '该会话正被另一个窗口/面板占用，请在那边关闭该会话后再改名'
+          : `改名失败：${message}`,
+        'error',
+      )
+    }
+  }
+
+  const doRenameBranch = async (id: string, title: string) => {
+    if (actions === null) return
+    try {
+      await actions.renameBranch(id, title)
+      setInputFor(null)
+      showToast('分支已改名')
+      onBranchesChanged()
+    } catch (cause) {
+      showToast(`改名失败：${cause instanceof Error ? cause.message : String(cause)}`, 'error')
+    }
+  }
+
+  // First follow-up on a stub materializes the real session.
+  const doActivateBranch = async (stub: PendingBranchDTO, text: string) => {
+    if (actions === null) return
+    try {
+      const { sessionId } = await actions.activateBranch(stub, text)
+      setInputFor(null)
+      showToast(`分支已创建为会话 ${sessionId.slice(0, 8)}…，追问已发送`)
+      onBranchesChanged()
+      window.setTimeout(onReload, 400)
+    } catch (cause) {
+      showToast(`追问失败：${cause instanceof Error ? cause.message : String(cause)}`, 'error')
+    }
+  }
+
+  const openReader = (sessionId: string, turn: TurnDTO) => {
+    setReader({ sessionId, turn })
+    if (actions === null) return
+    setReaderLoading(true)
+    void fetchTurns(sessionId, true)
+      .then(list => {
+        const full = list.turns.find(t => t.startSeq === turn.startSeq)
+        if (full !== undefined) setReader({ sessionId, turn: full })
+      })
+      .catch(() => {})
+      .finally(() => setReaderLoading(false))
   }
 
   return (
@@ -515,6 +649,19 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
         {toast !== null ? (
           <div className={`dshm-toast${toast.kind === 'error' ? ' is-error' : ''}`}>{toast.text}</div>
         ) : null}
+        {reader !== null ? (
+          <div className="dshm-reader" role="dialog" aria-label="展开阅读">
+            <div className="dshm-reader-bar">
+              <span className="dshm-reader-title">{reader.turn.question.slice(0, 48)}</span>
+              <button type="button" className="dshm-btn" onClick={() => setReader(null)}>收起</button>
+            </div>
+            <div className="dshm-reader-body dshm-md">
+              {readerLoading ? <span className="dshm-hint">加载全文…</span> : null}
+              <div className="dshm-reader-q">{renderMarkdown(reader.turn.question)}</div>
+              {reader.turn.answer !== '' ? <div className="dshm-reader-a">{renderMarkdown(reader.turn.answer)}</div> : null}
+            </div>
+          </div>
+        ) : null}
         {layout !== null ? (
           <div ref={layerRef} className="dshm-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})` }}>
             {layout.groups.map(group => (
@@ -536,7 +683,7 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
                 <div
                   key={node.sessionId}
                   data-session-id={node.sessionId}
-                  className={`dshm-lane${isSub ? ' is-sub' : ''}`}
+                  className={`dshm-lane${isSub ? ' is-sub' : ''}${node.pending === true ? ' is-pending' : ''}`}
                   style={{ left: pos.x, top: pos.y, width: CARD_W }}
                 >
                   <div
@@ -548,55 +695,98 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
                     }}
                   >
                     {isSub ? '[sub] ' : ''}
-                    {node.isSeeded ? '⑂ ' : ''}
+                    {node.pending === true ? '◇ ' : node.isSeeded ? '⑂ ' : ''}
                     {node.title}
                     {runningById[node.sessionId] === true ? <span className="dshm-badge is-running">运行中</span> : null}
                   </div>
                   {actions !== null ? (
                     <div className="dshm-lane-actions">
-                      <button type="button" onClick={() => doJump(node.sessionId, list?.turns[0]?.messageId ?? null)}>打开</button>
-                      <button type="button" onClick={() => setFollowUpFor(current => (current === node.sessionId ? null : node.sessionId))}>追问</button>
-                      <button type="button" onClick={() => doFork(node.sessionId, undefined)}>分支</button>
+                      {node.pending === true ? null : (
+                        <button type="button" onClick={() => doJump(node.sessionId, list?.turns[0]?.messageId ?? null)}>打开</button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === (node.pending === true ? 'activate' : 'followup') ? null : { kind: node.pending === true ? 'activate' : 'followup', sessionId: node.sessionId }))}
+                      >
+                        追问
+                      </button>
+                      {node.pending === true ? (
+                        <>
+                          <button type="button" onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === 'renameBranch' ? null : { kind: 'renameBranch', sessionId: node.sessionId }))}>改名</button>
+                          <button type="button" onClick={() => doDeleteBranch(node.sessionId)}>✕</button>
+                        </>
+                      ) : (
+                        <>
+                          <button type="button" onClick={() => doCreateBranch(node, null)}>分支</button>
+                          <button type="button" onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === 'rename' ? null : { kind: 'rename', sessionId: node.sessionId }))}>改名</button>
+                        </>
+                      )}
                     </div>
                   ) : null}
-                  {followUpFor === node.sessionId && actions !== null ? (
-                    <FollowUpInput onSend={text => doFollowUp(node.sessionId, text)} onCancel={() => setFollowUpFor(null)} />
+                  {inputFor !== null && inputFor.sessionId === node.sessionId ? (
+                    inputFor.kind === 'renameBranch' ? (
+                      <InputRow
+                        placeholder="新的分支名…（Enter 确认）"
+                        initial=""
+                        onSend={(text: string) => doRenameBranch(node.sessionId, text)}
+                        onCancel={() => setInputFor(null)}
+                      />
+                    ) : inputFor.kind === 'rename' ? (
+                      <InputRow
+                        placeholder="新的会话标题…（Enter 确认）"
+                        initial={node.title}
+                        onSend={(text: string) => doRenameSession(node.sessionId, text)}
+                        onCancel={() => setInputFor(null)}
+                      />
+                    ) : inputFor.kind === 'activate' ? (
+                      <FollowUpInput
+                        placeholder="第一次追问——此刻才真正创建这个分支的会话"
+                        onSend={(text: string) => doActivateBranch(branches.find(b => b.id === node.sessionId) as PendingBranchDTO, text)}
+                        onCancel={() => setInputFor(null)}
+                      />
+                    ) : (
+                      <FollowUpInput onSend={(text: string) => doFollowUp(node.sessionId, text)} onCancel={() => setInputFor(null)} />
+                    )
                   ) : null}
                   {list === undefined ? (
                     <div className="dshm-card"><span className="dshm-loading">读取会话…</span></div>
                   ) : list.turns.length === 0 ? (
-                    <div className="dshm-card"><span className="dshm-loading">（无投影轮次：空白或全部为注入内容）</span></div>
+                    <div className="dshm-card">
+                      <span className="dshm-loading">{node.pending === true ? '等待第一次追问——届时才创建会话' : '（无投影轮次：空白或全部为注入内容）'}</span>
+                    </div>
                   ) : (
                     list.turns.map(turn => {
                       const badge = statusBadge(turn)
                       const failed = turn.tools.filter(tool => !tool.ok).length
                       const pendingApproval = turn.approvals.filter(a => a.pending).length
+                      const expandable = turn.answer !== '' || turn.question.length > 120
                       return (
                         <div key={turn.startSeq} className={`dshm-card${turn.status === 'error' ? ' is-error' : ''}`}>
                           {badge !== null ? <span className={`dshm-badge ${badge.className}`}>{badge.label}</span> : null}
                           <p
                             className="dshm-q"
-                            title="点击跳转到原生对话的这一轮"
+                            title={actions !== null ? '点击跳转到原生对话的这一轮' : undefined}
                             onClick={() => doJump(node.sessionId, turn.messageId)}
                             style={actions !== null ? { cursor: 'pointer' } : undefined}
                           >
                             {turn.question}
                           </p>
                           {turn.answer !== '' ? <p className="dshm-a">{turn.answer}</p> : null}
-                          {(turn.tools.length > 0 || turn.todoCount > 0 || turn.approvals.length > 0) ? (
-                            <div className="dshm-chips">
-                              {turn.tools.slice(0, 4).map((tool, index) => (
-                                <span key={index} className={`dshm-chip${tool.ok ? '' : ' is-fail'}`}>{tool.name}</span>
-                              ))}
-                              {turn.tools.length > 4 ? <span className="dshm-chip">+{turn.tools.length - 4}</span> : null}
-                              {failed > 0 ? <span className="dshm-chip is-fail">{failed} 失败</span> : null}
-                              {turn.todoCount > 0 ? <span className="dshm-chip">todo×{turn.todoCount}</span> : null}
-                              {pendingApproval > 0 ? <span className="dshm-chip is-warn">{pendingApproval} 待审批</span> : null}
-                              {actions !== null ? (
-                                <button type="button" className="dshm-chip is-branch" onClick={() => doFork(node.sessionId, turn.startSeq)}>⎇ 从此分支</button>
-                              ) : null}
-                            </div>
-                          ) : null}
+                          <div className="dshm-chips">
+                            {expandable && actions !== null ? (
+                              <button type="button" className="dshm-chip is-expand" onClick={() => openReader(node.sessionId, turn)}>展开阅读</button>
+                            ) : null}
+                            {turn.tools.slice(0, 4).map((tool, index) => (
+                              <span key={index} className={`dshm-chip${tool.ok ? '' : ' is-fail'}`}>{tool.name}</span>
+                            ))}
+                            {turn.tools.length > 4 ? <span className="dshm-chip">+{turn.tools.length - 4}</span> : null}
+                            {failed > 0 ? <span className="dshm-chip is-fail">{failed} 失败</span> : null}
+                            {turn.todoCount > 0 ? <span className="dshm-chip">todo×{turn.todoCount}</span> : null}
+                            {pendingApproval > 0 ? <span className="dshm-chip is-warn">{pendingApproval} 待审批</span> : null}
+                            {actions !== null ? (
+                              <button type="button" className="dshm-chip is-branch" onClick={() => doCreateBranch(node, turn.startSeq)}>⎇ 从此分支</button>
+                            ) : null}
+                          </div>
                         </div>
                       )
                     })
@@ -611,14 +801,14 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
   )
 }
 
-function FollowUpInput({ onSend, onCancel }: { onSend: (text: string) => void; onCancel: () => void }) {
+function FollowUpInput({ onSend, onCancel, placeholder }: { onSend: (text: string) => void; onCancel: () => void; placeholder?: string }) {
   const [text, setText] = useState('')
   return (
     <div className="dshm-followup">
       <textarea
         autoFocus
         value={text}
-        placeholder="追问这个会话…（Enter 发送，Shift+Enter 换行）"
+        placeholder={placeholder ?? '追问这个会话…（Enter 发送，Shift+Enter 换行）'}
         onChange={event => setText(event.target.value)}
         onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey) {
@@ -633,6 +823,30 @@ function FollowUpInput({ onSend, onCancel }: { onSend: (text: string) => void; o
         <button type="button" className="dshm-btn" onClick={() => { const t = text.trim(); if (t !== '') onSend(t) }}>发送</button>
         <button type="button" className="dshm-btn" onClick={onCancel}>取消</button>
       </div>
+    </div>
+  )
+}
+
+function InputRow({ onSend, onCancel, placeholder, initial }: { onSend: (text: string) => void; onCancel: () => void; placeholder: string; initial: string }) {
+  const [text, setText] = useState(initial)
+  return (
+    <div className="dshm-followup">
+      <input
+        autoFocus
+        type="text"
+        value={text}
+        placeholder={placeholder}
+        onChange={event => setText(event.target.value)}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            const trimmed = text.trim()
+            if (trimmed !== '') onSend(trimmed)
+          }
+          if (event.key === 'Escape') onCancel()
+        }}
+        style={{ height: 28, borderRadius: 6, border: '1px solid #94a3b8', padding: '0 8px', fontSize: 12 }}
+      />
     </div>
   )
 }

@@ -7,7 +7,12 @@
 export interface ClientSessionsFace {
   fork(opts: { sessionId: string; atSeq?: number; increaseTitle?: boolean }): Promise<string>
   create(opts?: { workspaceId?: string; cwd?: string }): Promise<string>
-  binding(id: string): { session: { prompt(content: Array<{ type: 'text'; text: string }>, mode: 'queue' | 'steer'): Promise<{ ok?: boolean; error?: { message?: string } }> } } | undefined
+  binding(id: string): {
+    session: {
+      prompt(content: Array<{ type: 'text'; text: string }>, mode: 'queue' | 'steer'): Promise<{ ok?: boolean; error?: { message?: string } }>
+      rename?(title: string): Promise<{ ok?: boolean; error?: { message?: string } }>
+    }
+  } | undefined
   using<T>(target: string, options: { source: string }, operation: (reference: unknown) => T | Promise<T>): Promise<T>
   retain(target: string, options?: { source?: unknown }): { ready: Promise<unknown>; session?: unknown; binding?: { session: unknown } }
 }
@@ -128,7 +133,9 @@ export async function sendFollowUp(sessions: ClientSessionsFace, sessionId: stri
   if (existing !== undefined) return runPrompt(existing)
 
   if (typeof sessions.using !== 'function') throw new Error('会话未在客户端实例化，且当前版本不支持自动实例化')
-  await sessions.using(sessionId, { source: 'mainView' }, async (reference: unknown) => {
+  // "workspaceOperation": a fresh retain generation that never collides with
+  // the sidebar's open mainView write handle.
+  await sessions.using(sessionId, { source: 'workspaceOperation' }, async (reference: unknown) => {
     const binding = (reference as { binding?: { session: unknown } } | null)?.binding
       ?? (sessions.binding?.(sessionId) as { session?: unknown } | undefined)
     const session = (binding?.session ?? (reference as { session?: unknown }).session) as
@@ -142,4 +149,33 @@ export async function sendFollowUp(sessions: ClientSessionsFace, sessionId: stri
 /** Fork a session at an exact event seq (inclusive prefix). */
 export async function forkSessionAt(sessions: ClientSessionsFace, sessionId: string, atSeq?: number): Promise<string> {
   return sessions.fork({ sessionId, atSeq, increaseTitle: true })
+}
+
+/** Rename a session through the materialized binding's `rename` face —
+ * the same normalization and durable `session/title` event as the native
+ * row-menu rename. */
+export async function renameSession(sessions: ClientSessionsFace, sessionId: string, title: string): Promise<void> {
+  const run = async (session: { rename?: (title: string) => Promise<{ ok?: boolean; error?: { message?: string } }> }): Promise<void> => {
+    if (typeof session.rename !== 'function') throw new Error('当前版本不支持从地图改名')
+    const result = await session.rename(title)
+    if (result && result.ok !== true && result.error !== undefined) {
+      throw new Error(result.error.message ?? '改名未被执行')
+    }
+  }
+  const binding = sessions.binding?.(sessionId)
+  if (binding?.session !== undefined) {
+    await run(binding.session)
+    return
+  }
+  // "workspaceOperation" (the native rename's own source) — a fresh retain
+  // generation, so an already-open sidebar view never blocks the write handle.
+  await sessions.using(sessionId, { source: 'workspaceOperation' }, async (reference: unknown) => {
+    const refBinding = (reference as { binding?: { session: unknown } } | null)?.binding
+      ?? (sessions.binding?.(sessionId) as { session?: unknown } | undefined)
+    const session = (refBinding?.session ?? (reference as { session?: unknown }).session) as
+      | { rename?: (title: string) => Promise<{ ok?: boolean; error?: { message?: string } }> }
+      | undefined
+    if (session === undefined) throw new Error('会话实例化失败，无法改名')
+    await run(session)
+  })
 }

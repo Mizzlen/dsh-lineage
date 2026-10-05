@@ -24,6 +24,11 @@ export interface RawSessionLog {
 
 const ANSWER_SNIPPET_LIMIT = 400
 const QUESTION_SNIPPET_LIMIT = 800
+const FULL_LIMIT = 200_000
+
+function snippetIn(full: boolean, text: string, limit: number): string {
+  return snippet(text, full ? FULL_LIMIT : limit)
+}
 
 /** Extract model-facing text from a message content block list. */
 export function contentText(content: unknown): string {
@@ -91,8 +96,9 @@ interface MutableTurn {
  *   behind synapse #23/#31 by construction.
  * - Fork-inherited prefix (`inheritedEventCount`) is skipped: the parent card
  *   already represents that history.
+ * - `full` skips card snippets for the expanded reading view.
  */
-export function buildTurns(log: RawSessionLog): TurnDTO[] {
+export function buildTurns(log: RawSessionLog, full = false): TurnDTO[] {
   const inherited = Number.isSafeInteger(log.inheritedEventCount) ? (log.inheritedEventCount as number) : 0
   const turns: MutableTurn[] = []
   let current: MutableTurn | null = null
@@ -111,7 +117,7 @@ export function buildTurns(log: RawSessionLog): TurnDTO[] {
         startSeq: event.seq,
         messageId: typeof data?.id === 'string' ? data.id : null,
         time: typeof event.time === 'number' ? event.time : 0,
-        question: snippet(text, QUESTION_SNIPPET_LIMIT),
+        question: snippetIn(full, text, QUESTION_SNIPPET_LIMIT),
         answerParts: [],
         tools: [],
         pendingCalls: new Map(),
@@ -202,7 +208,7 @@ export function buildTurns(log: RawSessionLog): TurnDTO[] {
     messageId: turn.messageId,
     time: turn.time,
     question: turn.question,
-    answer: snippet(turn.answerParts.join('\n\n'), ANSWER_SNIPPET_LIMIT),
+    answer: snippetIn(full, turn.answerParts.join('\n\n'), ANSWER_SNIPPET_LIMIT),
     tools: turn.tools,
     todoCount: turn.todoCount,
     status: turn.status,

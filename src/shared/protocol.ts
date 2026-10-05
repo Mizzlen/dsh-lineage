@@ -45,6 +45,18 @@ export interface NodeDTO {
   delegationDepth: number
   isSeeded: boolean
   createdAt: number
+  /** True for lazy-branch stubs: no DSH session exists yet. */
+  pending?: boolean
+}
+
+/** A recorded branch intent; the session appears on first follow-up. */
+export interface PendingBranchDTO {
+  id: string
+  sourceSessionId: string
+  atSeq: number | null
+  title: string
+  workspaceId: string
+  createdAt: string
 }
 
 /** Fork edge: the child was seeded from `from` at its durable seed cut. */

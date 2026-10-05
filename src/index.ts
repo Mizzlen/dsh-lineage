@@ -6,13 +6,14 @@
 import { buildTurns, type RawSessionLog } from './server/project'
 import { buildGraph, type RawSessionRecord } from './server/graph'
 import { LayoutStore } from './server/layout-store'
+import { BranchStore } from './server/branch-store'
 import type { GraphDTO, HealthReport, LayoutDocDTO, TurnListDTO } from './shared/protocol'
 
 export const name = 'dsh-mapper'
 
 export const inject = ['webServer', 'sessionQuery', 'workspaceRegistry'] as const
 
-const VERSION = '0.0.2'
+const VERSION = '0.0.3'
 
 interface ServerResponse {
   writeHead(status: number, headers: Record<string, string>): unknown
@@ -88,6 +89,7 @@ function hostAllowed(headers: ServerRequest['headers'], trusted: Set<string>): b
 export function apply(ctx: Ctx, config?: { trustedHosts?: unknown; dataDir?: unknown }): void {
   const dataDir = typeof config?.dataDir === 'string' && config.dataDir.trim() !== '' ? config.dataDir : undefined
   const layouts = dataDir !== undefined ? new LayoutStore(dataDir) : null
+  const branches = dataDir !== undefined ? new BranchStore(dataDir) : null
   const trusted = new Set<string>(['localhost', '127.0.0.1'])
   if (Array.isArray(config?.trustedHosts)) {
     for (const host of config.trustedHosts) {
@@ -125,10 +127,10 @@ export function apply(ctx: Ctx, config?: { trustedHosts?: unknown; dataDir?: unk
     return graph
   }
 
-  const fetchTurns = async (sessionId: string): Promise<TurnListDTO> => {
+  const fetchTurns = async (sessionId: string, full = false): Promise<TurnListDTO> => {
     if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) throw new InputError('非法会话 id')
     const log = await ctx.sessionQuery.readSession(sessionId)
-    return { sessionId, turns: buildTurns(log) }
+    return { sessionId, turns: buildTurns(log, full) }
   }
 
   const api = async (req: ServerRequest, res: ServerResponse): Promise<void> => {
@@ -139,7 +141,31 @@ export function apply(ctx: Ctx, config?: { trustedHosts?: unknown; dataDir?: unk
     }
     const turns = /^\/mapper\/api\/sessions\/([A-Za-z0-9_-]+)\/turns$/.exec(path)
     if (turns !== null && req.method === 'GET') {
-      return void sendJson(res, 200, await fetchTurns(turns[1]))
+      const full = new URL(req.url ?? '/', 'http://dsh.local').searchParams.get('full') === '1'
+      return void sendJson(res, 200, await fetchTurns(turns[1], full))
+    }
+    if (path === '/mapper/api/branches' && req.method === 'GET' && branches !== null) {
+      return void sendJson(res, 200, { branches: await branches.all() })
+    }
+    if (path === '/mapper/api/branches' && req.method === 'POST' && branches !== null) {
+      const body = await readJson(req)
+      const stub = await branches.create({
+        sourceSessionId: String(body?.sourceSessionId ?? ''),
+        atSeq: body?.atSeq ?? null,
+        title: typeof body?.title === 'string' ? body.title : undefined,
+        workspaceId: String(body?.workspaceId ?? ''),
+      })
+      return void sendJson(res, 201, { branch: stub })
+    }
+    const branch = /^\/mapper\/api\/branches\/([A-Za-z0-9-]+)$/.exec(path)
+    if (branch !== null && branches !== null) {
+      if (req.method === 'PUT') {
+        const body = await readJson(req)
+        return void sendJson(res, 200, { branch: await branches.rename(branch[1], body?.title) })
+      }
+      if (req.method === 'DELETE') {
+        return void sendJson(res, 200, { deleted: await branches.remove(branch[1]) })
+      }
     }
     const layout = /^\/mapper\/api\/layout\/(.+)$/.exec(path)
     if (layout !== null && layouts !== null) {

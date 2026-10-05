@@ -1,6 +1,6 @@
 {
   "name": "dsh-mapper",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A visual conversation map plugin for DeepSeek Harness: sessions, follow-ups and forks as one navigable canvas.",
   "type": "module",
   "main": "./lib/index.js",
@@ -42,6 +42,7 @@
     "@types/node": "^26.0.0",
     "@types/react": "^19.3.0",
     "esbuild": "^0.27.0",
+    "react": "^19.3.0",
     "typescript": "^5.9.0",
     "vitest": "^3.0.0"
   },
