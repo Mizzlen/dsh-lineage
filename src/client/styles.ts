@@ -1,11 +1,17 @@
 // Scoped styles for the map overlay. Light values are defaults; dark mode
 // overrides key off the web client's body[data-ds-dark-theme] signal.
 export const MAP_STYLES = `
-.dshm-overlay { position: fixed; inset: 0; z-index: 60; background: #f5f7fa; }
+.dshm-overlay { position: fixed; inset: 0; z-index: 60; background: #f5f7fa; user-select: none; -webkit-user-select: none; }
+.dshm-reader, .dshm-followup { user-select: text; -webkit-user-select: text; }
 body[data-ds-dark-theme] .dshm-overlay { background: #16181d; }
 .dshm-canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; }
 .dshm-canvas.is-panning { cursor: grabbing; }
-.dshm-layer { position: absolute; transform-origin: 0 0; will-change: transform; }
+/* No standing will-change on the layer: it freezes Chromium's raster scale,
+   so zoomed-in frames just upsample the scale-1 texture (blurry). Repaint at
+   the current scale keeps text/edges vector-crisp; promotion is re-enabled
+   only while panning, where translation never changes the raster scale. */
+.dshm-layer { position: absolute; transform-origin: 0 0; }
+.dshm-canvas.is-panning .dshm-layer { will-change: transform; }
 .dshm-edges { position: absolute; overflow: visible; pointer-events: none; }
 .dshm-edge { fill: none; stroke: #94a3b8; stroke-width: 1.5; }
 .dshm-group { position: absolute; }
