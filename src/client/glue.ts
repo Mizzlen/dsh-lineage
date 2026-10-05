@@ -19,14 +19,42 @@ export type OpenTurnResult = 'ok' | 'session-switched' | 'session-not-in-sidebar
  * out of the Controller, so the bridge clicks the sidebar row (matched by
  * display title) and then locates the chat DOM anchor: native chat renders
  * `data-chat-anchor-key="<surfaceIndex>:input-message<uuid>"`, so the message
- * id is the stable handle (event seqs are not in the key). */
-export async function openTurnInConversation(sessionId: string, messageId: string | null, displayTitle: string): Promise<OpenTurnResult> {
+ * id is the stable handle (event seqs are not in the key).
+ *
+ * `isCurrentSession` skips the sidebar entirely: the conversation is already
+ * open beneath the map, so after the map closes only the scroll is needed. */
+export async function openTurnInConversation(sessionId: string, messageId: string | null, displayTitle: string, isCurrentSession = false): Promise<OpenTurnResult> {
   if (typeof document === 'undefined') return 'no-dom'
   const wanted = displayTitle.trim()
+  const anchorSelector = messageId !== null && messageId !== ''
+    ? `[data-chat-anchor-key$="input-message${messageId}"]`
+    : null
+  const scrollWhenPresent = async (timeoutMs: number): Promise<OpenTurnResult> => {
+    if (anchorSelector === null) return 'turn-not-found'
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      const anchor = document.querySelector<HTMLElement>(anchorSelector)
+      if (anchor !== null) {
+        anchor.scrollIntoView({ block: 'start' })
+        return 'ok'
+      }
+    }
+    return 'turn-not-found'
+  }
+
+  if (isCurrentSession) {
+    // Already the visible conversation: reveal it and scroll, never fail the
+    // jump on a missing anchor.
+    await scrollWhenPresent(3000)
+    return 'ok'
+  }
+
   // Row accessible names compose the title with row-action chrome ("… Session
-  // actions for … Archive session Pin session") and a relative time; forks
-  // carry " (1)" inside the title. Strip the chrome, then match exactly so the
-  // original never resolves to its fork's row (or vice versa).
+  // actions for … Archive session Pin session") and a relative time glued on
+  // without whitespace ("介绍 otty 工具1h"); forks carry " (1)" inside the
+  // title. Strip the chrome, then match exactly so the original never
+  // resolves to its fork's row (or vice versa).
   const stripRowChrome = (label: string) => label
     .replace(/\s*Session actions for[\s\S]*$/, '')
     .replace(/\d+(?:min|s|h|d|w)\s*$/i, '')
@@ -37,11 +65,30 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
   }
   const expandTruncatedList = (): boolean => {
     const more = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button =>
-      /^\d+ more sessions|更多会话|Show \d+ more/.test(button.textContent?.trim() ?? ''),
+      /more sessions|更多会话|显示更多/i.test(button.textContent?.trim() ?? ''),
     )
     if (more === undefined) return false
     more.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     return true
+  }
+  // Virtualized lists only render visible rows: walk the sessions tree's
+  // scrollable ancestor, rescanning after each step.
+  const scrollScan = async (): Promise<HTMLDivElement | undefined> => {
+    const tree = document.querySelector('[role="tree"]')
+    let scroller: HTMLElement | null = null
+    for (let el = tree?.parentElement; el !== null && el !== undefined; el = el.parentElement) {
+      if (el.scrollHeight > el.clientHeight + 4 && el.clientHeight > 120) { scroller = el; break }
+    }
+    if (scroller === null) return undefined
+    for (let step = 0; step < 30; step += 1) {
+      const row = findRow()
+      if (row !== undefined) return row
+      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4
+      if (atBottom) return undefined
+      scroller.scrollTop += Math.max(240, Math.round(scroller.clientHeight * 0.8))
+      await new Promise(resolve => setTimeout(resolve, 150))
+    }
+    return findRow()
   }
 
   let row = findRow()
@@ -50,6 +97,7 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
     await new Promise(resolve => setTimeout(resolve, 250))
     row = findRow()
   }
+  if (row === undefined) row = await scrollScan()
   if (row === undefined) return 'session-not-in-sidebar'
 
   // React handlers may sit on an inner row element, not the treeitem itself:
@@ -59,23 +107,9 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
   const clickTarget = deepest.at(-1) ?? row
   clickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 
-  // Wait for the conversation view to materialize, then scroll to the turn.
-  const anchorSelector = messageId !== null && messageId !== ''
-    ? `[data-chat-anchor-key$="input-message${messageId}"]`
-    : null
-  const deadline = Date.now() + 6000
-  while (Date.now() < deadline) {
-    await new Promise(resolve => setTimeout(resolve, 300))
-    const anchor = anchorSelector !== null
-      ? document.querySelector<HTMLElement>(anchorSelector)
-      : null
-    if (anchor !== null) {
-      anchor.scrollIntoView({ block: 'start' })
-      return 'ok'
-    }
-  }
-  // The session did switch; only the turn anchor stayed missing.
-  return 'session-switched'
+  const scrolled = await scrollWhenPresent(6000)
+  // The session did switch; only the turn anchor may be missing.
+  return scrolled === 'turn-not-found' ? 'session-switched' : scrolled
 }
 
 /** Send one follow-up user message. The session is materialized on demand

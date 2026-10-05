@@ -6,14 +6,15 @@ A visual conversation map plugin for DeepSeek Harness: sessions, follow-ups and 
 
 **DSH session logs remain the only source of truth.** The plugin reads them on demand through `ctx.sessionQuery` and persists nothing but view metadata (lane drag offsets). It never touches prompts, tool schemas, provider routing, or KV-cache prefixes.
 
-## Features (M2/M3)
+## Features (v0.0.2)
 
+- **Session-centric scope**: opening the map from a session centers on it and shows its lineage neighborhood (ancestor chain + fork descendants), strictly inside its workspace. One drill-up — "expand to workspace map" — and the workspace is the ceiling: no aggregation above it.
 - **Read-only map**: lane = session (title + running badge), card = one turn (question, answer snippet, tool chips, failure count, cancelled/error badges, pending-approval chips), SVG curves = fork lineage edges (from `SessionHeader.parentSession`).
-- **Jump**: click a card's question to close the map, open the conversation, and scroll to that exact turn (sidebar-row + chat-anchor bridge with explicit degradation).
-- **Follow-up**: inline input on a lane, sent through the session binding's `prompt(…, 'queue')`.
+- **Jump**: click a card's question to close the map, open the conversation, and scroll to that exact turn. The current session takes a direct path (no sidebar lookup); others go through the sidebar-row bridge (auto-expands truncated lists, scrolls virtualized rows) with explicit degradation.
+- **Follow-up**: inline input on a lane, sent through the session binding's `prompt(…, 'queue')` (sessions are materialized on demand).
 - **Fork**: per lane (latest completed turn) or per card (exact `atSeq` cut).
 - **Layout persistence**: drag lane headers; offsets are stored per workspace under `$DSH_HOME/dsh-mapper/layout/` (view metadata only).
-- **Subagent toggle**, live running status, viewport culling, wheel zoom / shift-alt pan / drag pan / double-click fit.
+- **Subagent toggle**, live running status, wheel zoom / shift-alt pan / drag pan / double-click reset (session scope re-centers).
 
 ## Compatibility
 

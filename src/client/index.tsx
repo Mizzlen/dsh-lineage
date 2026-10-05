@@ -48,7 +48,7 @@ function extractSessionFacts(snapshot: any): { ids: string[]; running: Record<st
 
 function HeaderButton(props: any) {
   return (
-    <button type="button" onClick={() => props.open()} style={{ cursor: 'pointer' }}>
+    <button type="button" onClick={() => props.open(props.sessionId)} style={{ cursor: 'pointer' }}>
       会话地图
     </button>
   )
@@ -59,10 +59,12 @@ interface OverlayEntryProps {
   onClose: () => void
   useSessions?: (selector: (value: any) => any) => any
   actions: MapActions | null
+  origin: () => string | null
 }
 
-function MapOverlayEntry({ useOpen, onClose, useSessions, actions }: OverlayEntryProps) {
+function MapOverlayEntry({ useOpen, onClose, useSessions, actions, origin }: OverlayEntryProps) {
   const open = useOpen() === true
+  const originSessionId = typeof origin === 'function' ? origin() : null
   const snapshot = typeof useSessions === 'function' ? useSessions((value: any) => value) : undefined
   const facts = useMemo(() => extractSessionFacts(snapshot), [snapshot])
 
@@ -160,6 +162,7 @@ function MapOverlayEntry({ useOpen, onClose, useSessions, actions }: OverlayEntr
       actions={actions}
       layouts={layouts}
       onOffsetChange={onOffsetChange}
+      originSessionId={originSessionId}
       onClose={onClose}
       onReload={load}
     />
@@ -168,10 +171,12 @@ function MapOverlayEntry({ useOpen, onClose, useSessions, actions }: OverlayEntr
 
 export function apply(ctx: { effect(fn: () => () => void, id?: string): void; slots: SlotsLike; sessions?: ClientSessionsFace }): void {
   const openSource: Source<boolean> & { set(value: boolean): void } = createSource(false)
+  // The session whose header button opened the map (session-scoped slot prop).
+  const originRef: { current: string | null } = { current: null }
 
   const actions: MapActions | null = ctx.sessions
     ? {
-        jump: (sessionId, messageId, displayTitle) => openTurnInConversation(sessionId, messageId, displayTitle),
+        jump: (sessionId, messageId, displayTitle, isCurrentSession) => openTurnInConversation(sessionId, messageId, displayTitle, isCurrentSession),
         followUp: (sessionId, text) => sendFollowUp(ctx.sessions as ClientSessionsFace, sessionId, text),
         forkAt: (sessionId, atSeq) => forkSessionAt(ctx.sessions as ClientSessionsFace, sessionId, atSeq),
       }
@@ -200,13 +205,18 @@ export function apply(ctx: { effect(fn: () => () => void, id?: string): void; sl
     name: 'conversation.session.header.actions',
     id: 'dsh-mapper-open',
     order: 900,
-    inject: () => ({ open: () => openSource.set(true) }),
+    inject: () => ({
+      open: (sessionId: unknown) => {
+        originRef.current = typeof sessionId === 'string' ? sessionId : null
+        openSource.set(true)
+      },
+    }),
   }, HeaderButton)
   contribute('shell.overlay', {
     name: 'shell.overlay',
     id: 'dsh-mapper-map',
     order: 60,
-    inject: () => ({ onClose: () => openSource.set(false), useOpen: subscribeHook(openSource), actions }),
+    inject: () => ({ onClose: () => openSource.set(false), useOpen: subscribeHook(openSource), actions, origin: () => originRef.current }),
   }, MapOverlayEntry as any)
 
   ctx.effect(() => () => style.remove(), 'dsh-mapper: styles')

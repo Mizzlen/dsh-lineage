@@ -5,6 +5,7 @@
 // offsets persist per workspace through the Host layout routes.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { GraphDTO, LayoutDocDTO, NodeDTO, TurnListDTO } from '../shared/protocol'
+import { scopedGraph, type MapScope } from './scope'
 
 const CARD_W = 300
 const TURN_H = 96
@@ -38,7 +39,7 @@ function refetchTurnInto(sessionId: string, apply: (list: TurnListDTO) => void):
 }
 
 export interface MapActions {
-  jump(sessionId: string, messageId: string | null, displayTitle: string): Promise<'ok' | 'session-switched' | 'session-not-in-sidebar' | 'turn-not-found' | 'no-dom'>
+  jump(sessionId: string, messageId: string | null, displayTitle: string, isCurrentSession: boolean): Promise<'ok' | 'session-switched' | 'session-not-in-sidebar' | 'turn-not-found' | 'no-dom'>
   followUp(sessionId: string, text: string): Promise<void>
   forkAt(sessionId: string, atSeq?: number): Promise<string>
 }
@@ -159,15 +160,17 @@ export interface MapPanelProps {
   actions: MapActions | null
   layouts: Record<string, LayoutDocDTO>
   onOffsetChange: (workspaceId: string, sessionId: string, dx: number, dy: number) => void
+  originSessionId: string | null
   onClose: () => void
   onReload: () => void
 }
 
-export function MapPanel({ graph, error, loading, runningById, actions, layouts, onOffsetChange, onClose, onReload }: MapPanelProps) {
+export function MapPanel({ graph, error, loading, runningById, actions, layouts, onOffsetChange, originSessionId, onClose, onReload }: MapPanelProps) {
   const [turns, setTurns] = useState<Map<string, TurnListDTO>>(new Map())
   const [camera, setCamera] = useState({ x: 40, y: 24, scale: 0.9 })
   const [panning, setPanning] = useState(false)
   const [showSubagents, setShowSubagents] = useState(false)
+  const [scope, setScope] = useState<MapScope>('session')
   const [followUpFor, setFollowUpFor] = useState<string | null>(null)
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null)
   const [viewSize, setViewSize] = useState({ w: 1280, h: 720 })
@@ -219,12 +222,11 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph])
 
-  // Track viewport size for culling and fit-to-view.
+  // Track viewport size for centering and fit-to-view. The overlay is
+  // position:fixed inset:0, so the window IS the canvas; measuring the
+  // element caught mid-mount layout and froze stale numbers.
   useEffect(() => {
-    const measure = () => {
-      const el = canvasRef.current
-      if (el !== null) setViewSize({ w: el.clientWidth, h: el.clientHeight })
-    }
+    const measure = () => setViewSize({ w: window.innerWidth, h: window.innerHeight })
     measure()
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
@@ -326,10 +328,17 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     return merged
   }, [layouts, drag])
 
+  // Scope: session-centric (lineage neighborhood, workspace-isolated) by
+  // default; the only drill-up is the workspace map. Never above that.
+  const scoped = useMemo(
+    () => (graph === null ? null : scopedGraph(graph, scope, originSessionId)),
+    [graph, scope, originSessionId],
+  )
   const visibleGraph = useMemo(() => {
-    if (graph === null || showSubagents) return graph
-    return { ...graph, nodes: graph.nodes.filter(n => n.origin !== 'subagent' && (n.delegationDepth ?? 0) === 0) }
-  }, [graph, showSubagents])
+    if (scoped === null) return null
+    if (showSubagents) return scoped
+    return { ...scoped, nodes: scoped.nodes.filter(n => n.origin !== 'subagent' && (n.delegationDepth ?? 0) === 0) }
+  }, [scoped, showSubagents])
 
   const layout = useMemo(
     () => (visibleGraph === null ? null : layoutGraph(visibleGraph, laneHeights, mergedOffsets)),
@@ -342,16 +351,36 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
     setCamera({ x: (viewSize.w - layoutResult.width * scale) / 2, y: 20, scale })
   }, [viewSize.w])
 
+  // Session scope puts the origin lane in the middle of the screen at full
+  // size; the workspace view fits everything.
+  const centerOnOrigin = useCallback((layoutResult: LayoutResult | null) => {
+    if (layoutResult === null || originSessionId === null) return fitToView(layoutResult)
+    const pos = layoutResult.positions.get(originSessionId)
+    if (pos === undefined) return fitToView(layoutResult)
+    setCamera({
+      x: Math.round(viewSize.w / 2 - (pos.x + CARD_W / 2)),
+      y: Math.round(Math.max(20, viewSize.h / 2 - (pos.y + LANE_HEADER_H + 60))),
+      scale: 1,
+    })
+  }, [originSessionId, viewSize.w, viewSize.h, fitToView])
+
   const fittedKeyRef = useRef<string>('')
   const userMovedRef = useRef(false)
   useEffect(() => {
     if (layout === null || graph === null) return
     if (userMovedRef.current) return
-    const key = `${graph.nodes.length}:${turns.size}:${viewSize.w}`
+    const key = `${scope}:${originSessionId}:${graph.nodes.length}:${turns.size}:${viewSize.w}`
     if (fittedKeyRef.current === key) return
     fittedKeyRef.current = key
-    fitToView(layout)
-  }, [layout, graph, turns.size, viewSize.w, fitToView])
+    if (scope === 'session') centerOnOrigin(layout)
+    else fitToView(layout)
+  }, [layout, graph, turns.size, viewSize.w, scope, originSessionId, fitToView, centerOnOrigin])
+
+  const toggleScope = () => {
+    setScope(current => (current === 'session' ? 'workspace' : 'session'))
+    userMovedRef.current = false
+    fittedKeyRef.current = ''
+  }
 
   const edges = useMemo(() => {
     const list: Array<{ key: string; d: string }> = []
@@ -413,13 +442,12 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
   }
 
   const doJump = async (sessionId: string, messageId: string | null) => {
-    if (actions === null || messageId === null) {
-      showToast('这张卡片还没有可跳转的轮次', 'error')
-      return
-    }
+    if (actions === null) return
+    // A turn-less fork (no owned events) still opens the session — without a
+    // scroll target the map closes and the toast says so.
     const title = graph?.nodes.find(n => n.sessionId === sessionId)?.title ?? sessionId
     try {
-      const result = await actions.jump(sessionId, messageId, title)
+      const result = await actions.jump(sessionId, messageId, title, sessionId === originSessionId)
       if (result === 'ok' || result === 'session-switched') {
         onClose()
         if (result === 'session-switched') showToast('已打开会话，但没定位到那一轮（已停在会话开头）', 'error')
@@ -467,15 +495,20 @@ export function MapPanel({ graph, error, loading, runningById, actions, layouts,
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onDoubleClick={() => { userMovedRef.current = false; fittedKeyRef.current = ''; fitToView(layout) }}
+        onDoubleClick={() => { userMovedRef.current = false; fittedKeyRef.current = ''; if (scope === 'session') centerOnOrigin(layout); else fitToView(layout) }}
       >
         <div className="dshm-topbar">
           <button type="button" className="dshm-btn" onClick={onClose}>返回对话（Esc）</button>
           <button type="button" className="dshm-btn" onClick={onReload}>刷新</button>
+          {originSessionId !== null ? (
+            <button type="button" className="dshm-btn" onClick={toggleScope}>
+              {scope === 'session' ? '展开为工作区地图' : '回到会话中心'}
+            </button>
+          ) : null}
           <button type="button" className="dshm-btn" onClick={() => setShowSubagents(value => !value)}>
             {showSubagents ? '隐藏 subagent' : '显示 subagent'}
           </button>
-          <span className="dshm-hint">滚轮缩放 · Shift/Alt+滚轮平移 · 拖拽标题移动泳道 · 双击复位</span>
+          <span className="dshm-hint">{scope === 'session' ? '会话视角（血缘邻域）· ' : '工作区视角 · '}滚轮缩放 · Shift/Alt+滚轮平移 · 拖拽标题移动泳道 · 双击复位</span>
           {loading ? <span className="dshm-hint">加载中…</span> : null}
           {error !== null ? <span className="dshm-hint" style={{ color: '#b42323' }}>{error}</span> : null}
         </div>
