@@ -2,7 +2,8 @@
 // Opening from a session yields a session-centric view (the session's lineage
 // neighborhood inside its workspace); the only drill-up is the workspace map.
 // There is deliberately no level above the workspace.
-import type { GraphDTO } from '../shared/protocol'
+import type { GraphDTO, TurnDTO, TurnListDTO } from '../shared/protocol'
+import { turnKey } from '../shared/protocol'
 
 export type MapScope = 'session' | 'workspace'
 
@@ -69,4 +70,25 @@ export function scopedGraph(graph: GraphDTO, scope: MapScope, originSessionId: s
     workspaceId = first?.workspaceId ?? null
   }
   return workspaceSlice(graph, workspaceId)
+}
+
+/** Y offset (within the source lane) where a fork edge should leave it: the
+ * card covering the fork cut when both the cut and that card's measured
+ * position are known, else null (the edge leaves from the lane header). The
+ * cut comes from a lazy-branch stub's recorded atSeq or the forked child's
+ * turns response seedSeq — both are the last inherited event seq. */
+export function forkAnchorY(
+  list: TurnListDTO | undefined,
+  cut: number | null | undefined,
+  cardPos: Record<string, { top: number; height: number }>,
+): number | null {
+  if (cut === null || cut === undefined || list === undefined) return null
+  let best: TurnDTO | undefined
+  for (const turn of list.turns) {
+    if (turn.startSeq <= cut && (best === undefined || turn.startSeq > best.startSeq)) best = turn
+  }
+  if (best === undefined) return null
+  const card = cardPos[turnKey(list.sessionId, best.startSeq)]
+  if (card === undefined) return null
+  return card.top + card.height / 2
 }

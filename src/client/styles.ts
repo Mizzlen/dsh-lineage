@@ -115,21 +115,33 @@ body[data-ds-dark-theme] .dshm-lane.is-pending .dshm-session-title { background:
 /* macOS traffic lights: keep the topbar clear of the window controls. */
 .dshm-mac .dshm-topbar { left: 88px; }
 
-/* Expanded-reading drawer and shared markdown spec (v0.0.3). */
-.dshm-reader {
-  position: absolute; top: 0; right: 0; bottom: 0; width: min(680px, 60vw);
-  background: #ffffff; border-left: 1px solid #d7dee8; box-shadow: -8px 0 24px rgba(15, 23, 42, 0.12);
-  display: flex; flex-direction: column; z-index: 4;
+/* Expanded-reading float (v0.0.4): the clicked card rises to the foreground
+   center over a dimmed backdrop. The float is a sibling of the canvas element
+   (not a descendant), so wheel events over it scroll the body and never reach
+   the canvas's wheel-zoom listener. */
+.dshm-reader-scrim {
+  position: absolute; inset: 0; background: rgba(15, 23, 42, 0.42);
+  animation: dshm-scrim-in 200ms ease; z-index: 4;
 }
-body[data-ds-dark-theme] .dshm-reader { background: #20242c; border-left-color: #343b46; }
+body[data-ds-dark-theme] .dshm-reader-scrim { background: rgba(2, 4, 10, 0.55); }
+@keyframes dshm-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+.dshm-reader {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(720px, 88vw); max-height: 78vh;
+  background: #ffffff; border: 1px solid #d7dee8; border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.30), 0 6px 18px rgba(15, 23, 42, 0.18);
+  display: flex; flex-direction: column; overflow: hidden; z-index: 5;
+  will-change: transform;
+}
+body[data-ds-dark-theme] .dshm-reader { background: #20242c; border-color: #343b46; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55); }
 .dshm-reader-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 12px 16px; border-bottom: 1px solid #e2e8f0;
+  padding: 12px 16px; border-bottom: 1px solid #e2e8f0; flex: none;
 }
 body[data-ds-dark-theme] .dshm-reader-bar { border-bottom-color: #343b46; }
 .dshm-reader-title { font: 600 13px Inter, system-ui, sans-serif; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 body[data-ds-dark-theme] .dshm-reader-title { color: #f1f5f9; }
-.dshm-reader-body { padding: 16px 20px 32px; overflow-y: auto; }
+.dshm-reader-body { padding: 16px 20px 32px; overflow-y: auto; overscroll-behavior: contain; }
 .dshm-reader-q { font: 600 14px/1.6 Inter, system-ui, sans-serif; color: #0f172a; margin-bottom: 14px; }
 body[data-ds-dark-theme] .dshm-reader-q { color: #f1f5f9; }
 .dshm-reader-a { font: 400 13px/1.75 Inter, system-ui, sans-serif; color: #1e293b; }

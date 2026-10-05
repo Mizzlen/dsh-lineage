@@ -5,7 +5,8 @@
 // offsets persist per workspace through the Host layout routes.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { GraphDTO, LayoutDocDTO, NodeDTO, PendingBranchDTO, TurnDTO, TurnListDTO } from '../shared/protocol'
-import { scopedGraph, type MapScope } from './scope'
+import { turnKey } from '../shared/protocol'
+import { forkAnchorY, scopedGraph, type MapScope } from './scope'
 import { renderMarkdown } from './markdown'
 
 const CARD_W = 300
@@ -158,9 +159,9 @@ export function layoutGraph(
   return { positions, groups, width: maxX + 120, height: Math.max(maxY, cursorY) + 120 }
 }
 
-function edgePath(from: LayoutPosition, to: LayoutPosition): string {
+function edgePath(from: LayoutPosition, to: LayoutPosition, anchorY: number | null = null): string {
   const x1 = from.x + CARD_W
-  const y1 = from.y + LANE_HEADER_H / 2
+  const y1 = from.y + (anchorY ?? LANE_HEADER_H / 2)
   const x2 = to.x
   const y2 = to.y + LANE_HEADER_H / 2
   const mid = (x1 + x2) / 2
@@ -188,7 +189,12 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
   const [panning, setPanning] = useState(false)
   const [showSubagents, setShowSubagents] = useState(false)
   const [scope, setScope] = useState<MapScope>('session')
-  const [reader, setReader] = useState<{ sessionId: string; turn: TurnDTO } | null>(null)
+  const [reader, setReader] = useState<{
+    sessionId: string
+    turn: TurnDTO
+    /** Screen rect of the clicked card: the float card animates out of it. */
+    sourceRect: { left: number; top: number; width: number; height: number }
+  } | null>(null)
   const [inputFor, setInputFor] = useState<{ kind: 'followup' | 'rename' | 'renameBranch' | 'activate'; sessionId: string } | null>(null)
   const [readerLoading, setReaderLoading] = useState(false)
 
@@ -216,7 +222,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
         createdAt: Date.parse(stub.createdAt) || 0,
         pending: true,
       })
-      edges.push({ from: stub.sourceSessionId, to: stub.id, kind: 'fork' })
+      edges.push({ from: stub.sourceSessionId, to: stub.id, kind: 'fork', atSeq: stub.atSeq })
     }
     return { ...graph, nodes, edges }
   }, [graph, branches])
@@ -325,16 +331,20 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Escape') return
+      // The reading float owns Esc first; only when it is closed does the map exit.
+      if (reader !== null) setReader(null)
+      else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, reader])
 
-  // Real lane heights: cards render at natural size (multi-line text, chips,
-  // action rows), so estimates only seed pass one — a layout effect measures
-  // actual offsetHeights and feeds them back until stable.
+  // Real lane heights and per-card offsets: cards render at natural size
+  // (multi-line text, chips, action rows), so estimates only seed pass one —
+  // the layout effect below measures offsetHeights and feeds them back.
   const [measured, setMeasured] = useState<Record<string, number>>({})
+  const [cardPos, setCardPos] = useState<Record<string, { top: number; height: number }>>({})
 
   // A session's running flip true→false means its latest turn changed:
   // refresh that lane's cards right away.
@@ -363,20 +373,34 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
   // Pass two of the layout: after every commit, measure the real lane heights
   // (cards render at natural size) and feed them back. Positions never affect
   // heights, so this converges in one correction. All lanes stay in the DOM —
-  // culling would starve the measurement and reintroduce overlap.
+  // culling would starve the measurement and reintroduce overlap. Turn cards
+  // are measured too (offset within their lane) so fork edges can leave from
+  // the exact card covering the fork cut instead of the lane header.
   useLayoutEffect(() => {
     const layer = layerRef.current
     if (layer === null) return
     const next: Record<string, number> = {}
+    const nextCards: Record<string, { top: number; height: number }> = {}
     let changed = false
+    let cardsChanged = false
     for (const el of Array.from(layer.querySelectorAll<HTMLElement>('.dshm-lane'))) {
       const id = el.dataset.sessionId
       if (id === undefined || id === '') continue
       const height = el.offsetHeight
       next[id] = height
       if (Math.abs((measured[id] ?? 0) - height) > 1) changed = true
+      for (const card of Array.from(el.querySelectorAll<HTMLElement>('.dshm-card[data-seq]'))) {
+        const seq = Number(card.dataset.seq)
+        if (!Number.isSafeInteger(seq)) continue
+        const entry = { top: card.offsetTop, height: card.offsetHeight }
+        const key = turnKey(id, seq)
+        nextCards[key] = entry
+        const prev = cardPos[key]
+        if (prev === undefined || Math.abs(prev.top - entry.top) > 1 || Math.abs(prev.height - entry.height) > 1) cardsChanged = true
+      }
     }
     if (changed) setMeasured(current => ({ ...current, ...next }))
+    if (cardsChanged) setCardPos(current => ({ ...current, ...nextCards }))
   })
 
   const mergedOffsets = useMemo(() => {
@@ -445,10 +469,14 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
       const from = layout.positions.get(edge.from)
       const to = layout.positions.get(edge.to)
       if (from === undefined || to === undefined) continue
-      list.push({ key: `${edge.from}->${edge.to}`, d: edgePath(from, to) })
+      // Fork cut: stubs carry it on the edge; real forks carry it on the
+      // child's turns response. Anchored edges leave from the cut's card.
+      const cut = edge.atSeq ?? turns.get(edge.to)?.seedSeq ?? null
+      const anchorY = forkAnchorY(turns.get(edge.from), cut, cardPos)
+      list.push({ key: `${edge.from}->${edge.to}`, d: edgePath(from, to, anchorY) })
     }
     return list
-  }, [visibleGraph, layout])
+  }, [visibleGraph, layout, turns, cardPos])
 
   const onPointerDown = (event: React.PointerEvent) => {
     if (event.target !== (event.currentTarget as Element)) return
@@ -608,14 +636,21 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
     }
   }
 
-  const openReader = (sessionId: string, turn: TurnDTO) => {
-    setReader({ sessionId, turn })
+  const openReader = (sessionId: string, turn: TurnDTO, card: Element | null) => {
+    const rect = card?.getBoundingClientRect()
+    setReader({
+      sessionId,
+      turn,
+      sourceRect: rect !== undefined
+        ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+        : { left: viewSize.w / 2 - 160, top: viewSize.h / 2 - 90, width: 320, height: 180 },
+    })
     if (actions === null) return
     setReaderLoading(true)
     void fetchTurns(sessionId, true)
       .then(list => {
         const full = list.turns.find(t => t.startSeq === turn.startSeq)
-        if (full !== undefined) setReader({ sessionId, turn: full })
+        if (full !== undefined) setReader(current => (current === null ? current : { ...current, turn: full }))
       })
       .catch(() => {})
       .finally(() => setReaderLoading(false))
@@ -648,19 +683,6 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
         </div>
         {toast !== null ? (
           <div className={`dshm-toast${toast.kind === 'error' ? ' is-error' : ''}`}>{toast.text}</div>
-        ) : null}
-        {reader !== null ? (
-          <div className="dshm-reader" role="dialog" aria-label="展开阅读">
-            <div className="dshm-reader-bar">
-              <span className="dshm-reader-title">{reader.turn.question.slice(0, 48)}</span>
-              <button type="button" className="dshm-btn" onClick={() => setReader(null)}>收起</button>
-            </div>
-            <div className="dshm-reader-body dshm-md">
-              {readerLoading ? <span className="dshm-hint">加载全文…</span> : null}
-              <div className="dshm-reader-q">{renderMarkdown(reader.turn.question)}</div>
-              {reader.turn.answer !== '' ? <div className="dshm-reader-a">{renderMarkdown(reader.turn.answer)}</div> : null}
-            </div>
-          </div>
         ) : null}
         {layout !== null ? (
           <div ref={layerRef} className="dshm-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})` }}>
@@ -761,7 +783,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                       const pendingApproval = turn.approvals.filter(a => a.pending).length
                       const expandable = turn.answer !== '' || turn.question.length > 120
                       return (
-                        <div key={turn.startSeq} className={`dshm-card${turn.status === 'error' ? ' is-error' : ''}`}>
+                        <div key={turn.startSeq} data-seq={turn.startSeq} className={`dshm-card${turn.status === 'error' ? ' is-error' : ''}`}>
                           {badge !== null ? <span className={`dshm-badge ${badge.className}`}>{badge.label}</span> : null}
                           <p
                             className="dshm-q"
@@ -774,7 +796,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                           {turn.answer !== '' ? <p className="dshm-a">{turn.answer}</p> : null}
                           <div className="dshm-chips">
                             {expandable && actions !== null ? (
-                              <button type="button" className="dshm-chip is-expand" onClick={() => openReader(node.sessionId, turn)}>展开阅读</button>
+                              <button type="button" className="dshm-chip is-expand" onClick={event => openReader(node.sessionId, turn, (event.currentTarget as HTMLElement).closest('.dshm-card'))}>展开阅读</button>
                             ) : null}
                             {turn.tools.slice(0, 4).map((tool, index) => (
                               <span key={index} className={`dshm-chip${tool.ok ? '' : ' is-fail'}`}>{tool.name}</span>
@@ -796,6 +818,57 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
             })}
           </div>
         ) : null}
+      </div>
+      {/* Reading float lives OUTSIDE the canvas element on purpose: the map's
+        wheel-zoom listener sits on the canvas, so wheel events over the float
+        scroll the float's body instead of zooming the map behind it. */}
+      {reader !== null ? (
+        <>
+          <div className="dshm-reader-scrim" onClick={() => setReader(null)} />
+          <ReaderCard reader={reader} loading={readerLoading} onClose={() => setReader(null)} />
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+/** The expanded-reading card: rises from the clicked card's rect to the
+ * foreground center (FLIP on mount), floating over a dimmed backdrop. */
+function ReaderCard({ reader, loading, onClose }: {
+  reader: { sessionId: string; turn: TurnDTO; sourceRect: { left: number; top: number; width: number; height: number } }
+  loading: boolean
+  onClose: () => void
+}) {
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const el = cardRef.current
+    if (el === null) return
+    const rect = el.getBoundingClientRect()
+    const src = reader.sourceRect
+    const dx = src.left + src.width / 2 - (rect.left + rect.width / 2)
+    const dy = src.top + src.height / 2 - (rect.top + rect.height / 2)
+    const scale = Math.max(0.2, Math.min(1, src.width / Math.max(rect.width, 1)))
+    el.style.transition = 'none'
+    el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(${scale})`
+    void el.getBoundingClientRect()
+    const raf = requestAnimationFrame(() => {
+      el.style.transition = 'transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1)'
+      el.style.transform = 'translate(-50%, -50%)'
+    })
+    return () => cancelAnimationFrame(raf)
+    // Mount-only: the float must animate once per open, not per content load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return (
+    <div ref={cardRef} className="dshm-reader" role="dialog" aria-label="展开阅读">
+      <div className="dshm-reader-bar">
+        <span className="dshm-reader-title">{reader.turn.question.slice(0, 48)}</span>
+        <button type="button" className="dshm-btn" onClick={onClose}>关闭</button>
+      </div>
+      <div className="dshm-reader-body dshm-md">
+        {loading ? <span className="dshm-hint">加载全文…</span> : null}
+        <div className="dshm-reader-q">{renderMarkdown(reader.turn.question)}</div>
+        {reader.turn.answer !== '' ? <div className="dshm-reader-a">{renderMarkdown(reader.turn.answer)}</div> : null}
       </div>
     </div>
   )

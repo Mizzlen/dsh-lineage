@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lineageNeighborhood, originWorkspaceId, scopedGraph, workspaceSlice, type MapScope } from '../src/client/scope'
+import { forkAnchorY, lineageNeighborhood, originWorkspaceId, scopedGraph, workspaceSlice, type MapScope } from '../src/client/scope'
 import type { GraphDTO, NodeDTO } from '../src/shared/protocol'
 
 const node = (id: string, opts: { ws?: string; parent?: string; sub?: boolean } = {}): NodeDTO => ({
@@ -84,5 +84,29 @@ describe('scopedGraph', () => {
   it('falls back to the workspace slice without an origin', () => {
     const view = scopedGraph(g, 'session' as MapScope, null)
     expect(view.nodes.map(n => n.sessionId).sort()).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('forkAnchorY', () => {
+  const cardPos = {
+    'p#8': { top: 40, height: 120 },
+    'p#50': { top: 180, height: 90 },
+  }
+  const list = {
+    sessionId: 'p',
+    turns: [
+      { startSeq: 8, messageId: null, time: 0, question: 'q1', answer: '', tools: [], todoCount: 0, status: 'ok' as const, approvals: [] },
+      { startSeq: 50, messageId: null, time: 0, question: 'q2', answer: '', tools: [], todoCount: 0, status: 'ok' as const, approvals: [] },
+    ],
+  }
+  it('anchors the edge to the card covering the cut', () => {
+    expect(forkAnchorY(list, 8, cardPos)).toBe(40 + 60)
+    expect(forkAnchorY(list, 99, cardPos)).toBe(180 + 45)
+  })
+  it('falls back to the header without a cut, turns, or a measured card', () => {
+    expect(forkAnchorY(list, null, cardPos)).toBeNull()
+    expect(forkAnchorY(undefined, 8, cardPos)).toBeNull()
+    expect(forkAnchorY(list, 8, {})).toBeNull()
+    expect(forkAnchorY({ sessionId: 'p', turns: [], seedSeq: 8 }, 8, cardPos)).toBeNull()
   })
 })

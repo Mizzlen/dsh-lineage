@@ -216,6 +216,13 @@ export function buildTurns(log: RawSessionLog, full = false): TurnDTO[] {
   }))
 }
 
+/** Fork cut of the read observation: the last inherited event seq, or null
+ * when the session owns its whole log. Drives turn-anchored fork edges. */
+export function seedSeqOf(log: RawSessionLog): number | null {
+  const inherited = Number.isSafeInteger(log.inheritedEventCount) ? (log.inheritedEventCount as number) : 0
+  return inherited > 0 ? inherited - 1 : null
+}
+
 /** Fallback card title when no generated title exists: the first question. */
 export function titleFromTurns(turns: TurnDTO[]): string | null {
   const first = turns[0]?.question ?? ''

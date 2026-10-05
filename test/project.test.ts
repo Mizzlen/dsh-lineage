@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTurns, contentText, textContent, titleFromTurns, type RawEvent } from '../src/server/project'
+import { buildTurns, contentText, seedSeqOf, textContent, titleFromTurns, type RawEvent } from '../src/server/project'
 
 const userMessage = (seq: number, text: string, time = 1000): RawEvent => ({
   type: 'user/message',
@@ -185,3 +185,14 @@ describe('contentText', () => {
 function turnEnd(seq: number): RawEvent {
   return { type: 'turn/end', seq, time: 1000, data: { reason: { kind: 'completed' } } }
 }
+
+describe('seedSeqOf', () => {
+  it('derives the fork cut from inheritedEventCount', () => {
+    expect(seedSeqOf({ session: { id: 's' }, inheritedEventCount: 144, events: [] })).toBe(143)
+    expect(seedSeqOf({ session: { id: 's' }, inheritedEventCount: 1, events: [] })).toBe(0)
+  })
+  it('returns null for sessions that own their whole log', () => {
+    expect(seedSeqOf({ session: { id: 's' }, events: [] })).toBeNull()
+    expect(seedSeqOf({ session: { id: 's' }, inheritedEventCount: 0, events: [] })).toBeNull()
+  })
+})

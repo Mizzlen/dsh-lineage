@@ -3,7 +3,7 @@
 // (ctx.sessionQuery, ctx.workspaceRegistry — docs/contract-notes.md §b/§c) and
 // serves it to the Web client map. The plugin stores nothing on the Host
 // side: content is read on demand, DSH remains the only source of truth.
-import { buildTurns, type RawSessionLog } from './server/project'
+import { buildTurns, seedSeqOf, type RawSessionLog } from './server/project'
 import { buildGraph, type RawSessionRecord } from './server/graph'
 import { LayoutStore } from './server/layout-store'
 import { BranchStore } from './server/branch-store'
@@ -13,7 +13,7 @@ export const name = 'dsh-mapper'
 
 export const inject = ['webServer', 'sessionQuery', 'workspaceRegistry'] as const
 
-const VERSION = '0.0.3'
+const VERSION = '0.0.4'
 
 interface ServerResponse {
   writeHead(status: number, headers: Record<string, string>): unknown
@@ -130,7 +130,7 @@ export function apply(ctx: Ctx, config?: { trustedHosts?: unknown; dataDir?: unk
   const fetchTurns = async (sessionId: string, full = false): Promise<TurnListDTO> => {
     if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) throw new InputError('非法会话 id')
     const log = await ctx.sessionQuery.readSession(sessionId)
-    return { sessionId, turns: buildTurns(log, full) }
+    return { sessionId, turns: buildTurns(log, full), seedSeq: seedSeqOf(log) }
   }
 
   const api = async (req: ServerRequest, res: ServerResponse): Promise<void> => {

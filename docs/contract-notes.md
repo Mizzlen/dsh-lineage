@@ -104,6 +104,14 @@ window.__ModuleLoader__.load({
 6. **画布布局必须两遍实测**：卡片自然高度（~150px）远大于估算（114px），估算法在 fork 树上必然重叠；渲染后 `useLayoutEffect` 量 `offsetHeight` 回灌重排一遍即收敛。视口剔除与测量互相饿死（未渲染的泳道永远量不到），当前语料规模下全量渲染 + 实测是正确取舍。
 7. **`shell.overlay` 的 hooks 通道不可用而普通 callback 成员可用**（M1 已记）——稳定自定义 hook（useState+subscribe）作为 inject 成员传入，React 视角是普通 hook，实测可靠。
 
+## v0.0.4 运行时实测补充（2026-10-05）
+
+1. **fork 切点的权威来源是 `SessionLogSnapshot.inheritedEventCount`**（`dsh-session-query` types.d.ts L26-27）：`readSession` 返回顶层字段，`seedSeq = inheritedEventCount − 1` 恰好等于 fork 请求的 `atSeq`（包含式切点）。无需扫 `session/end-seed` 事件。
+2. **`sessions.fork`（ClientSessions 门面）返回 childId 字符串**，不是 manager 层的 RemoteResult；`increaseTitle: true` 由门面在 fork 后对 **child** 追加一次 user 改名（"标题 (N)"，日志可见 seq 147/149/151 连续 (1)(2)(3) 均为 child 上的激活重名痕迹）。失败抛 `SessionForkError`。
+3. **Host 侧 rename 严格按 id 隔离**（源码核验 + 实测）：`resolveAgent(sessionId)` → `resumeObserved` 在 `observation.header.id !== sessionId` 时直接抛 `ApiSessionNotFound`；`AgentRegistry.enter` 要求 `agent.id === agent.session.id`；`sessionTitle.rename(session, …)` 只向 `session.id` 的日志追加 `session/title`（source=user，且会 supersede 在飞的 LLM 自动命名并 pin 标题）。**给懒分支存根改名（PUT /mapper/api/branches/:id）只写 branch-store JSON，父会话标题事件纹丝不动**——2026-10-05 浏览器端到端实测确认。
+4. **web profile 宿主进程启动时加载 lib/index.js，之后不随文件变化热更**：改服务端代码后必须重启 `dsh --profile web`；client bundle（lib/client.js）则是每次页面刷新现取的。排查"接口字段缺失"时先分辨这两侧。
+5. **fork 子会话的工作区归属可能滞后于注册表**：新 fork 的 child 可能落进 cwd 桶（graph 的 workspaceId 为 `cwd:…`）而非父会话的注册表工作区，会话中心视角（工作区隔离）会暂时看不到它。属 v0.0.2 归属行为，非回归。
+
 ## Desktop（Electron）安装实测（2026-10-04）
 
 - Desktop = `/Applications/DeepSeek Harness.app`，与 CLI **共用 `~/.dsh`**（同一 sessions/storages），启动 `~/.dsh/profiles/desktop`（bundle 栈 = `dsh-base` + `dsh-web-app`），内嵌同一套 web 栈并监听 `127.0.0.1:19387`（带与 web 相同的 token 鉴权 fence）。

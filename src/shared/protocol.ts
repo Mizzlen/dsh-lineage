@@ -24,6 +24,9 @@ export interface TurnDTO {
 export interface TurnListDTO {
   sessionId: string
   turns: TurnDTO[]
+  /** Fork cut of this session: last inherited event seq (read observation's
+   * inheritedEventCount − 1); absent/null when the session owns its whole log. */
+  seedSeq?: number | null
 }
 
 /** User-dragged lane offsets, persisted per workspace (D8: view metadata only). */
@@ -64,6 +67,9 @@ export interface EdgeDTO {
   from: string
   to: string
   kind: 'fork'
+  /** Known fork cut (lazy-branch stubs record it at creation); real forks
+   * resolve the cut from the child's turns response `seedSeq` instead. */
+  atSeq?: number | null
 }
 
 export interface WorkspaceGroupDTO {
