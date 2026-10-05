@@ -1,5 +1,7 @@
 # dsh-lineage 会话地图
 
+[![dsh.pub registry status](https://dsh.pub/api/badges/Mizzlen/dsh-lineage.svg)](https://dsh.pub/en/plugins/?q=Mizzlen%2Fdsh-lineage)
+
 [English](README.md) | 中文
 
 DeepSeek Harness 的可视化会话地图插件：把同一工作区下的会话、追问与 fork 分支摆上同一张可缩放、可拖拽的画布。

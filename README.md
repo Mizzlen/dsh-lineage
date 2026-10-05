@@ -1,5 +1,7 @@
 # dsh-lineage
 
+[![dsh.pub registry status](https://dsh.pub/api/badges/Mizzlen/dsh-lineage.svg)](https://dsh.pub/en/plugins/?q=Mizzlen%2Fdsh-lineage)
+
 [README 中文](README.zh-CN.md)
 
 A visual conversation map plugin for DeepSeek Harness: sessions, follow-ups and forks of one workspace as a single navigable canvas.
