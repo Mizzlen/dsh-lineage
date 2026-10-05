@@ -95,8 +95,8 @@ describe('forkAnchorY', () => {
   const list = {
     sessionId: 'p',
     turns: [
-      { startSeq: 8, messageId: null, time: 0, question: 'q1', answer: '', tools: [], todoCount: 0, status: 'ok' as const, approvals: [] },
-      { startSeq: 50, messageId: null, time: 0, question: 'q2', answer: '', tools: [], todoCount: 0, status: 'ok' as const, approvals: [] },
+      { startSeq: 8, endSeq: 40, messageId: null, time: 0, question: 'q1', answer: '', tools: [], todoCount: 0, status: 'ok' as const, approvals: [] },
+      { startSeq: 50, endSeq: 99, messageId: null, time: 0, question: 'q2', answer: '', tools: [], todoCount: 0, status: 'ok' as const, approvals: [] },
     ],
   }
   it('anchors the edge to the card covering the cut', () => {

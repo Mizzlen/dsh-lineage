@@ -196,3 +196,14 @@ describe('seedSeqOf', () => {
     expect(seedSeqOf({ session: { id: 's' }, inheritedEventCount: 0, events: [] })).toBeNull()
   })
 })
+
+describe('turn endSeq (fork cut for branch-from-turn)', () => {
+  it('captures the turn/end seq of a completed turn', () => {
+    const turns = buildTurns({
+      session: { id: 's1' },
+      events: [userMessage(8, '第一问'), assistantMessage(10, '第一答'), turnEnd(12), userMessage(20, '第二问')],
+    })
+    expect(turns[0].endSeq).toBe(12)
+    expect(turns[1].endSeq).toBeNull()
+  })
+})

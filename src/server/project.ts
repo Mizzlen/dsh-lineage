@@ -77,6 +77,7 @@ function describeError(value: unknown): string | null {
 
 interface MutableTurn {
   startSeq: number
+  endSeq: number | null
   messageId: string | null
   time: number
   question: string
@@ -115,6 +116,7 @@ export function buildTurns(log: RawSessionLog, full = false): TurnDTO[] {
       if (text.trim() === '') continue
       current = {
         startSeq: event.seq,
+        endSeq: null,
         messageId: typeof data?.id === 'string' ? data.id : null,
         time: typeof event.time === 'number' ? event.time : 0,
         question: snippetIn(full, text, QUESTION_SNIPPET_LIMIT),
@@ -180,6 +182,8 @@ export function buildTurns(log: RawSessionLog, full = false): TurnDTO[] {
         } else if (kind === 'cancelled' || kind === 'canceled' || kind === 'aborted') {
           current.status = 'cancelled'
         }
+        // The turn's own end seq: the fork cut that inherits this WHOLE turn.
+        if (Number.isSafeInteger(event.seq)) current.endSeq = event.seq as number
         break
       }
       case 'approval/asked': {
@@ -205,6 +209,7 @@ export function buildTurns(log: RawSessionLog, full = false): TurnDTO[] {
 
   return turns.map(turn => ({
     startSeq: turn.startSeq,
+    endSeq: turn.endSeq,
     messageId: turn.messageId,
     time: turn.time,
     question: turn.question,

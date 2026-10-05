@@ -569,6 +569,9 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
   }
 
   // Lazy fork: record a branch stub; the session appears on first follow-up.
+  // `atSeq` is the fork cut — the caller passes the turn's END seq so the
+  // child inherits the whole turn (question + answer), matching the edge the
+  // map draws from that card.
   const doCreateBranch = async (node: NodeDTO, atSeq: number | null) => {
     if (actions === null || node.workspaceId === null) {
       showToast('这条泳道无法创建分支', 'error')
@@ -821,8 +824,8 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                             <button
                               type="button"
                               className="dshm-branch-btn"
-                              title="从此分支（从这一轮分叉，连线由此按钮引出）"
-                              onClick={() => doCreateBranch(node, turn.startSeq)}
+                              title="从此分支（继承到这一轮结束为止的全部上下文，连线由此按钮引出）"
+                              onClick={() => doCreateBranch(node, turn.endSeq ?? turn.startSeq)}
                             >
                               &gt;
                             </button>

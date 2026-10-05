@@ -7,6 +7,10 @@
 export interface TurnDTO {
   /** seq of the `user/message` event that opened the turn. */
   startSeq: number
+  /** seq of this turn's `turn/end` event — the inclusive fork cut that
+   * inherits the WHOLE turn (question, answer, tools); null while the turn
+   * has not ended yet. */
+  endSeq: number | null
   /** Message id of the opening `user/message` (native chat anchor key). */
   messageId: string | null
   /** Unix epoch ms of the opening user message. */
