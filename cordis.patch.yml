@@ -7,5 +7,5 @@
         # Lane-offset persistence lives under the DSH home so uninstalling the
         # plugin leaves only this view-metadata directory behind.
         dataDir: !!js dshHomePath('dsh-lineage')
-        # Extra host authorities the /mapper API accepts besides localhost.
+        # Extra host authorities the /lineage API accepts besides localhost.
         trustedHosts: []
