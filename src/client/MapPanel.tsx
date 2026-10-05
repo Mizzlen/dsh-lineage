@@ -195,7 +195,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
     /** Screen rect of the clicked card: the float card animates out of it. */
     sourceRect: { left: number; top: number; width: number; height: number }
   } | null>(null)
-  const [inputFor, setInputFor] = useState<{ kind: 'followup' | 'rename' | 'renameBranch' | 'activate'; sessionId: string; seq: number | null } | null>(null)
+  const [inputFor, setInputFor] = useState<{ kind: 'rename' | 'renameBranch'; sessionId: string } | null>(null)
   const [readerLoading, setReaderLoading] = useState(false)
 
   // Merge lazy-branch stubs into the graph as pending nodes: they inherit the
@@ -552,11 +552,10 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
     }
   }
 
-  const doFollowUp = async (sessionId: string, text: string) => {
+  const doFollowUp = async (sessionId: string, text: string): Promise<void> => {
     if (actions === null) return
     try {
       await actions.followUp(sessionId, text)
-      setInputFor(null)
       showToast('追问已发送')
       // The answer lands seconds later: pull the session's turns again when
       // it should have completed (the running-flip path covers slow turns).
@@ -565,6 +564,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
       window.setTimeout(() => refetchTurnInto(sessionId, apply), 12000)
     } catch (cause) {
       showToast(`追问失败：${cause instanceof Error ? cause.message : String(cause)}`, 'error')
+      throw cause
     }
   }
 
@@ -630,16 +630,16 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
   }
 
   // First follow-up on a stub materializes the real session.
-  const doActivateBranch = async (stub: PendingBranchDTO, text: string) => {
+  const doActivateBranch = async (stub: PendingBranchDTO, text: string): Promise<void> => {
     if (actions === null) return
     try {
       const { sessionId } = await actions.activateBranch(stub, text)
-      setInputFor(null)
       showToast(`分支已创建为会话 ${sessionId.slice(0, 8)}…，追问已发送`)
       onBranchesChanged()
       window.setTimeout(onReload, 400)
     } catch (cause) {
       showToast(`追问失败：${cause instanceof Error ? cause.message : String(cause)}`, 'error')
+      throw cause
     }
   }
 
@@ -671,7 +671,11 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onDoubleClick={() => { userMovedRef.current = false; fittedKeyRef.current = ''; if (scope === 'session') centerOnOrigin(layout); else fitToView(layout) }}
+        onDoubleClick={event => {
+          // Double click inside an input is text selection, never a view reset.
+          if ((event.target as Element).closest('textarea, input') !== null) return
+          userMovedRef.current = false; fittedKeyRef.current = ''; if (scope === 'session') centerOnOrigin(layout); else fitToView(layout)
+        }}
       >
         <div className="dshm-topbar">
           <button type="button" className="dshm-btn" onClick={onClose}>返回对话（Esc）</button>
@@ -735,7 +739,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                       event.stopPropagation()
                       window.clearTimeout(clickTimer.current)
                       if (actions === null) return
-                      setInputFor(current => (current?.sessionId === node.sessionId && (current.kind === 'rename' || current.kind === 'renameBranch') ? null : { kind: node.pending === true ? 'renameBranch' : 'rename', sessionId: node.sessionId, seq: null }))
+                      setInputFor(current => (current?.sessionId === node.sessionId && (current.kind === 'rename' || current.kind === 'renameBranch') ? null : { kind: node.pending === true ? 'renameBranch' : 'rename', sessionId: node.sessionId }))
                     }}
                   >
                     {isSub ? '[sub] ' : ''}
@@ -763,32 +767,16 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                       />
                     )
                   ) : null}
-                  {list === undefined ? (
+                  {list === undefined && node.pending !== true ? (
                     <div className="dshm-card"><span className="dshm-loading">读取会话…</span></div>
-                  ) : list.turns.length === 0 ? (
+                  ) : null}
+                  {list !== undefined && list.turns.length === 0 && node.pending !== true ? (
                     <div className="dshm-card">
-                      <span className="dshm-loading">{node.pending === true ? '等待第一次追问——届时才创建会话' : '（无投影轮次：空白或全部为注入内容）'}</span>
-                      {node.pending === true && actions !== null ? (
-                        <div className="dshm-chips">
-                          <button
-                            type="button"
-                            className="dshm-chip is-ask"
-                            onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === 'activate' ? null : { kind: 'activate', sessionId: node.sessionId, seq: null }))}
-                          >
-                            追问
-                          </button>
-                        </div>
-                      ) : null}
-                      {inputFor !== null && inputFor.kind === 'activate' && inputFor.sessionId === node.sessionId ? (
-                        <FollowUpInput
-                          placeholder="第一次追问——此刻才真正创建这个分支的会话"
-                          onSend={(text: string) => doActivateBranch(branches.find(b => b.id === node.sessionId) as PendingBranchDTO, text)}
-                          onCancel={() => setInputFor(null)}
-                        />
-                      ) : null}
+                      <span className="dshm-loading">（无投影轮次：空白或全部为注入内容）</span>
                     </div>
-                  ) : (
-                    list.turns.map(turn => {
+                  ) : null}
+                  {list !== undefined && list.turns.length > 0
+                    ? list.turns.map(turn => {
                       const badge = statusBadge(turn)
                       const failed = turn.tools.filter(tool => !tool.ok).length
                       const pendingApproval = turn.approvals.filter(a => a.pending).length
@@ -828,20 +816,7 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                             {failed > 0 ? <span className="dshm-chip is-fail">{failed} 失败</span> : null}
                             {turn.todoCount > 0 ? <span className="dshm-chip">todo×{turn.todoCount}</span> : null}
                             {pendingApproval > 0 ? <span className="dshm-chip is-warn">{pendingApproval} 待审批</span> : null}
-                            {actions !== null ? (
-                              <button
-                                type="button"
-                                className="dshm-chip is-ask"
-                                title="就这个会话继续追问"
-                                onClick={() => setInputFor(current => (current?.sessionId === node.sessionId && current.kind === 'followup' && current.seq === turn.startSeq ? null : { kind: 'followup', sessionId: node.sessionId, seq: turn.startSeq }))}
-                              >
-                                追问
-                              </button>
-                            ) : null}
                           </div>
-                          {inputFor !== null && inputFor.kind === 'followup' && inputFor.sessionId === node.sessionId && inputFor.seq === turn.startSeq ? (
-                            <FollowUpInput onSend={(text: string) => doFollowUp(node.sessionId, text)} onCancel={() => setInputFor(null)} />
-                          ) : null}
                           {actions !== null ? (
                             <button
                               type="button"
@@ -855,7 +830,17 @@ export function MapPanel({ graph, branches, error, loading, runningById, actions
                         </div>
                       )
                     })
-                  )}
+                    : null}
+                  {/* 队列尾部的追问卡：整个卡片就是一个输入框。对存根而言，
+                    第一次追问即物化为真会话；对中间轮次的追问走「>」分支。 */}
+                  {actions !== null ? (
+                    <AskCard
+                      placeholder={node.pending === true ? '第一次追问——此刻才真正创建这个分支的会话（Enter 发送）' : '追问这个会话…（Enter 发送，Shift+Enter 换行）'}
+                      onSend={text => (node.pending === true
+                        ? doActivateBranch(branches.find(b => b.id === node.sessionId) as PendingBranchDTO, text)
+                        : doFollowUp(node.sessionId, text))}
+                    />
+                  ) : null}
                 </div>
               )
             })}
@@ -917,28 +902,43 @@ function ReaderCard({ reader, loading, onClose }: {
   )
 }
 
-function FollowUpInput({ onSend, onCancel, placeholder }: { onSend: (text: string) => void; onCancel: () => void; placeholder?: string }) {
+/** The trailing ask card: the whole card is one input. Enter sends,
+ * Shift+Enter breaks a line; the box grows with its content and clears on
+ * success — on failure the text stays (the toast explains why). */
+function AskCard({ placeholder, onSend }: { placeholder: string; onSend: (text: string) => Promise<void> }) {
   const [text, setText] = useState('')
+  const areaRef = useRef<HTMLTextAreaElement | null>(null)
+  const send = async () => {
+    const trimmed = text.trim()
+    if (trimmed === '') return
+    try {
+      await onSend(trimmed)
+      setText('')
+      if (areaRef.current !== null) areaRef.current.style.height = 'auto'
+    } catch {
+      // onSend already toasted the failure; keep the text for a retry.
+    }
+  }
   return (
-    <div className="dshm-followup">
+    <div className="dshm-card is-ask">
       <textarea
-        autoFocus
+        ref={areaRef}
+        rows={1}
         value={text}
-        placeholder={placeholder ?? '追问这个会话…（Enter 发送，Shift+Enter 换行）'}
-        onChange={event => setText(event.target.value)}
+        placeholder={placeholder}
+        onChange={event => {
+          setText(event.target.value)
+          const el = event.target
+          el.style.height = 'auto'
+          el.style.height = `${Math.min(160, el.scrollHeight)}px`
+        }}
         onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
-            const trimmed = text.trim()
-            if (trimmed !== '') onSend(trimmed)
+            void send()
           }
-          if (event.key === 'Escape') onCancel()
         }}
       />
-      <div className="dshm-followup-bar">
-        <button type="button" className="dshm-btn" onClick={() => { const t = text.trim(); if (t !== '') onSend(t) }}>发送</button>
-        <button type="button" className="dshm-btn" onClick={onCancel}>取消</button>
-      </div>
     </div>
   )
 }

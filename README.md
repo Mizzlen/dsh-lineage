@@ -6,15 +6,16 @@ A visual conversation map plugin for DeepSeek Harness: sessions, follow-ups and 
 
 **DSH session logs remain the only source of truth.** The plugin reads them on demand through `ctx.sessionQuery` and persists nothing but view metadata (lane drag offsets). It never touches prompts, tool schemas, provider routing, or KV-cache prefixes.
 
-## Features (v0.0.5)
+## Features (v0.0.6)
 
 - **Session-centric scope**: opening the map from a session centers on it and shows its lineage neighborhood (ancestor chain + fork descendants), strictly inside its workspace. One drill-up — "expand to workspace map" — and the workspace is the ceiling: no aggregation above it.
 - **Lane title, three-in-one**: single click opens the conversation, double click renames it (stub lanes rename the branch), drag moves the lane.
-- **Card interactions**: single click on the question jumps to that turn; **double click on the card background** opens expanded reading — the card rises to the foreground center over a dimmed backdrop (same markdown spec as the native page, via `src/client/markdown.ts`), wheel scrolls the float only; **"追问" (follow-up) sits at each card's bottom-right**; the **circular ">" on the card's right edge is "branch from this turn"** — the fork edge leaves from that button and lands on the cut's card.
+- **Ask card**: every lane's card queue **ends with a trailing ask card — the whole card is one input** (Enter sends, Shift+Enter breaks a line, grows with content); message cards carry no follow-up button, and **"asking about a middle turn" is expressed as a branch via the card's ">"**. A stub lane is just its ask card: the first send forks the real session and delivers the message.
+- **Card interactions**: single click on the question jumps to that turn; **double click on the card background** opens expanded reading — the card rises to the foreground center over a dimmed backdrop (same markdown spec as the native page, via `src/client/markdown.ts`), wheel scrolls the float only; the **circular ">" on the card's right edge is "branch from this turn"** — the fork edge leaves from that button and lands on the cut's card.
 - **Turn-anchored fork edges**: stubs record their turn at creation; materialized forks resolve the cut from the child log's inherited prefix length (`inheritedEventCount`). Both edge kinds leave from the cut card's ">" button, never the lane header.
-- **Lazy branches**: ">" only records a stub (dashed ◇ lane; ✕ in the title bar deletes, double click renames); the real session appears on the first follow-up. Stubs are pure view metadata under `$DSH_HOME/dsh-mapper/branches/` — renaming one writes only the stub file and never touches any DSH session.
+- **Lazy branches**: ">" only records a stub (dashed ◇ lane; ✕ in the title bar deletes, double click renames). Stubs are pure view metadata under `$DSH_HOME/dsh-mapper/branches/` and never touch any DSH session.
 - **Read-only map**: lane = session (title + running badge), card = one turn (question, answer snippet, tool chips, failure count, cancelled/error badges, pending-approval chips), SVG curves = fork lineage edges (from `SessionHeader.parentSession`).
-- **Follow-up**: sent through the session binding's `prompt(…, 'queue')` (sessions are materialized on demand).
+- **Reliable jumps**: the sidebar-row bridge expands collapsed workspace groups, handles truncated lists and virtualized rows, and strips the status/time chrome glued onto row labels (including the active row's "Completed…now") before exact-matching, distinguishing same-named forks; failures degrade explicitly.
 - **Layout persistence**: drag lane headers; offsets are stored per workspace under `$DSH_HOME/dsh-mapper/layout/` (view metadata only).
 - **Subagent toggle**, live running status, wheel zoom / shift-alt pan / drag pan / double-click-on-empty reset; panning never sweeps text selection and zoom stays vector-crisp.
 

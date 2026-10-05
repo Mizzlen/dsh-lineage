@@ -64,9 +64,19 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
     .replace(/\s*Session actions for[\s\S]*$/, '')
     .replace(/\d+(?:min|s|h|d|w)\s*$/i, '')
     .trim()
+  // The ACTIVE or just-finished row glues a status word onto the title and a
+  // "now" timestamp ("Completed<title>now") that the safe pass cannot strip.
+  // Only used as a second pass so titles that legitimately start with one of
+  // those words still match the safe way first.
+  const stripRowChromeAggressive = (label: string) => stripRowChrome(label)
+    .replace(/^(?:completed|running|errored|error|cancelled|canceled|queued|waiting)\s*/i, '')
+    .replace(/\s*now$/i, '')
+    .trim()
   const findRow = (): HTMLDivElement | undefined => {
     const items = Array.from(document.querySelectorAll<HTMLDivElement>('[role="treeitem"]'))
-    return items.find(item => wanted !== '' && stripRowChrome(item.getAttribute('aria-label') ?? item.textContent ?? '') === wanted)
+    if (wanted === '') return undefined
+    return items.find(item => stripRowChrome(item.getAttribute('aria-label') ?? item.textContent ?? '') === wanted)
+      ?? items.find(item => stripRowChromeAggressive(item.getAttribute('aria-label') ?? item.textContent ?? '') === wanted)
   }
   const expandTruncatedList = (): boolean => {
     const more = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button =>
@@ -74,6 +84,19 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
     )
     if (more === undefined) return false
     more.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    return true
+  }
+  // Sessions can also hide inside COLLAPSED workspace groups (a fork child may
+  // sit in the "Ungrouped" group while the map is opened from the parent's
+  // group, and vice versa). Click every collapsed group row so its sessions
+  // render; without this the row bridge reports "not in sidebar" for exactly
+  // the parent↔child hops.
+  const expandCollapsedGroups = (): boolean => {
+    const collapsed = Array.from(document.querySelectorAll<Element>('[role="treeitem"][aria-expanded="false"]'))
+    if (collapsed.length === 0) return false
+    for (const group of collapsed) {
+      group.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    }
     return true
   }
   // Virtualized lists only render visible rows: walk the sessions tree's
@@ -97,8 +120,11 @@ export async function openTurnInConversation(sessionId: string, messageId: strin
   }
 
   let row = findRow()
-  for (let attempt = 0; row === undefined && attempt < 4; attempt += 1) {
-    if (!expandTruncatedList()) break
+  for (let attempt = 0; row === undefined && attempt < 6; attempt += 1) {
+    // Truncated lists and collapsed groups both hide rows; expand whichever
+    // is present (alternating until neither fires) before rescanning.
+    const expanded = expandTruncatedList() || expandCollapsedGroups()
+    if (!expanded) break
     await new Promise(resolve => setTimeout(resolve, 250))
     row = findRow()
   }

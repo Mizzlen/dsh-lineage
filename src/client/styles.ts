@@ -2,7 +2,7 @@
 // overrides key off the web client's body[data-ds-dark-theme] signal.
 export const MAP_STYLES = `
 .dshm-overlay { position: fixed; inset: 0; z-index: 60; background: #f5f7fa; user-select: none; -webkit-user-select: none; }
-.dshm-reader, .dshm-followup { user-select: text; -webkit-user-select: text; }
+.dshm-reader, .dshm-followup, .dshm-card.is-ask { user-select: text; -webkit-user-select: text; }
 body[data-ds-dark-theme] .dshm-overlay { background: #16181d; }
 .dshm-canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; }
 .dshm-canvas.is-panning { cursor: grabbing; }
@@ -56,9 +56,15 @@ body[data-ds-dark-theme] .dshm-a { color: #94a3b8; }
 body[data-ds-dark-theme] .dshm-chip { background: #2a303a; color: #94a3b8; }
 .dshm-chip.is-fail { background: #fdeaea; color: #b42323; }
 body[data-ds-dark-theme] .dshm-chip.is-fail { background: #3a2626; color: #e0a0a0; }
-.dshm-chip.is-ask { margin-left: auto; border: 0; cursor: pointer; }
-.dshm-chip.is-ask:hover { background: #dbeafe; color: #1d4ed8; }
-body[data-ds-dark-theme] .dshm-chip.is-ask:hover { background: #1e3a5f; color: #93c5fd; }
+/* Trailing ask card: the whole card is one input (dashed to read as "open
+   slot" rather than a rendered turn). */
+.dshm-card.is-ask { border-style: dashed; padding: 6px 10px; }
+.dshm-card.is-ask textarea {
+  display: block; width: 100%; resize: none; border: 0; outline: none; background: transparent;
+  font: inherit; color: inherit; line-height: 1.5; padding: 2px 0; max-height: 160px; overflow-y: auto;
+}
+.dshm-card.is-ask textarea::placeholder { color: #94a3b8; }
+body[data-ds-dark-theme] .dshm-card.is-ask textarea::placeholder { color: #6b7686; }
 .dshm-badge {
   float: right; border-radius: 999px; padding: 1px 8px; font-size: 10px; font-weight: 700;
   background: #e2e8f0; color: #475569;

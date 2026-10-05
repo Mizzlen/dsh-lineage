@@ -113,6 +113,9 @@ window.__ModuleLoader__.load({
 5. **fork 子会话的工作区归属可能滞后于注册表**：新 fork 的 child 可能落进 cwd 桶（graph 的 workspaceId 为 `cwd:…`）而非父会话的注册表工作区，会话中心视角（工作区隔离）会暂时看不到它。属 v0.0.2 归属行为，非回归。
 6. **画布图层渲染（2026-10-05）**：`.dshm-layer` 禁止常驻 `will-change: transform`——Chromium 对 will-change 图层冻结 raster scale，缩放只是纹理上采样（放大即糊）；去掉后每帧按当前 scale 重栅格化，文字/SVG 边保持矢量清晰。图层提升只在拖拽平移期间（`.is-panning`）临时恢复——平移不改变 raster scale。同批：`.dshm-overlay` 全局 `user-select:none`（阅读浮层与追问输入恢复 `text`），画布拖拽不再选走顶栏文本。
 7. **BranchStore 缓存会复活绕过 API 的盘改（2026-10-05）**：宿主进程持有 branch-store 的内存 cache，直接编辑磁盘 JSON 后，任何一次经 API 的写入（如 create）都会把 cache 里的旧数据整份 persist 回盘。清理存根必须走 `DELETE /mapper/api/branches/:id`（或先停宿主再改盘）。
+8. **侧栏行 chrome 的完整形态与折叠组（2026-10-05，v0.0.6 跳转修复）**：
+   - 活动/刚结束会话的行文本 = `Completed` + 标题 + `now` **三段无分隔粘合**（"Completed标题now"）——安全剥离（Session actions 尾巴 + 数字时间）剥不掉，父子互跳因此整等失败；跳转桥改为两段式：安全剥离整等失败后再用激进剥离（状态词前缀 `completed|running|errored|…` + 尾部 `now`）整等。
+   - fork 子会话可能落在侧栏 **"Ungrouped" 组**（cwd 桶归属），该组默认折叠——折叠组的行不在 DOM 上，只扫 `[role="treeitem"]` 永远找不到。桥在匹配失败时先点击所有 `[role="treeitem"][aria-expanded="false"]` 展开组再重扫。两者合起来修复"从父进入点子 / 从子进入点父都报找不到会话"。
 
 ## Desktop（Electron）安装实测（2026-10-04）
 
