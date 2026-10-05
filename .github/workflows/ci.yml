@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run build
+      - run: npm test
+      - run: npm run verify:artifact
+
+  # Activation smoke against the latest published DSH release: the bundle must
+  # compose into the web profile (the synapse #32 class of breakage surfaces here).
+  rc-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run build
+      - run: npm install -g @deepseek-ai/dsh
+      - run: dsh plugin --profile web add ./
+      - run: dsh --profile web --dump-config | grep -q dsh-mapper
+      - run: dsh --profile web --dump-config > /dev/null && echo "composition ok"

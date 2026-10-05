@@ -1,0 +1,51 @@
+{
+  "name": "dsh-mapper",
+  "version": "0.0.1",
+  "description": "A visual conversation map plugin for DeepSeek Harness: sessions, follow-ups and forks as one navigable canvas.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs && tsc --noEmit",
+    "test": "vitest run",
+    "verify:artifact": "node scripts/verify-artifact.mjs"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer"
+      ],
+      "immediately": false
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.3.0",
+    "esbuild": "^0.27.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.27.7": true
+  }
+}

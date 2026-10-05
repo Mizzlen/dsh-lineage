@@ -1,0 +1,11 @@
+# dsh-mapper only extends the Web profile: it reuses the running DSH server
+# and the existing Web client module system (no second process, no iframe).
+- insert:
+    - id: dsh-mapper
+      name: dsh-mapper
+      config:
+        # Lane-offset persistence lives under the DSH home so uninstalling the
+        # plugin leaves only this view-metadata directory behind.
+        dataDir: !!js dshHomePath('dsh-mapper')
+        # Extra host authorities the /mapper API accepts besides localhost.
+        trustedHosts: []
